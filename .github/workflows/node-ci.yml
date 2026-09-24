@@ -1,0 +1,199 @@
+name: Node CI
+
+# Pull-request CI for an npm package: `npm ci`, then lint, typecheck, build,
+# tests and a package-contents check, plus `npm audit` in a parallel job.
+#
+# lint, typecheck, build and test run through `npm run --if-present`, so a
+# package without one of those scripts just skips it.
+#
+# The caller job needs `permissions: contents: read`.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version. Also used for the audit job.
+        type: string
+        default: '24'
+      node-matrix:
+        description: 'Optional JSON array of Node.js versions to test instead of node-version, e.g. ["22", "24"].'
+        type: string
+        default: ''
+      working-directory:
+        description: Directory containing package.json and package-lock.json.
+        type: string
+        default: .
+      lint:
+        description: Run `npm run lint` if the script exists.
+        type: boolean
+        default: true
+      typecheck:
+        description: Run `npm run typecheck` if the script exists.
+        type: boolean
+        default: true
+      build:
+        description: Run the build script if it exists.
+        type: boolean
+        default: true
+      build-script:
+        description: Name of the build script.
+        type: string
+        default: build
+      dist-dir:
+        description: Fail if this directory doesn't exist after the build. Empty skips the check.
+        type: string
+        default: ''
+      pre-test-commands:
+        description: Shell commands run after the build and before the tests, e.g. fixture installs or `npx playwright install --with-deps chromium`.
+        type: string
+        default: ''
+      test:
+        description: Run `npm test` if the script exists.
+        type: boolean
+        default: true
+      extra-scripts:
+        description: Additional npm scripts to run after the tests, one per line, e.g. `test:e2e`.
+        type: string
+        default: ''
+      env-vars:
+        description: Extra environment variables for all steps, one `NAME=value` per line.
+        type: string
+        default: ''
+      free-disk-space:
+        description: Remove large preinstalled toolchains from the runner first (about 20 GB).
+        type: boolean
+        default: false
+      pack-check:
+        description: List the files `npm pack` would publish, so unexpected package contents show up in review.
+        type: boolean
+        default: true
+      audit:
+        description: Run the dependency audit job.
+        type: boolean
+        default: true
+      audit-command:
+        description: Command that performs the audit.
+        type: string
+        default: npm audit --audit-level=high
+      timeout-minutes:
+        description: Timeout of the CI job.
+        type: number
+        default: 20
+
+permissions: {}
+
+jobs:
+  ci:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ${{ fromJSON(inputs.node-matrix || format('["{0}"]', inputs.node-version)) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set environment variables
+        if: inputs.env-vars != ''
+        env:
+          ENV_VARS: ${{ inputs.env-vars }}
+        run: |
+          while IFS= read -r line; do
+            [[ -z "${line// }" ]] && continue
+            if [[ ! "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]]; then
+              echo "::error::env-vars: expected NAME=value, got: ${line%%=*}"
+              exit 1
+            fi
+            echo "$line" >> "$GITHUB_ENV"
+          done <<< "$ENV_VARS"
+
+      - name: Free disk space
+        if: inputs.free-disk-space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.working-directory }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        if: inputs.lint
+        run: npm run --if-present lint
+
+      - name: Typecheck
+        if: inputs.typecheck
+        run: npm run --if-present typecheck
+
+      - name: Build
+        if: inputs.build
+        env:
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+        run: npm run --if-present "$BUILD_SCRIPT"
+
+      - name: Check build output
+        if: inputs.dist-dir != ''
+        env:
+          DIST_DIR: ${{ inputs.dist-dir }}
+        run: |
+          if [[ ! -d "$DIST_DIR" ]]; then
+            echo "::error::Build output directory '$DIST_DIR' not found"
+            exit 1
+          fi
+
+      - name: Pre-test commands
+        if: inputs.pre-test-commands != ''
+        env:
+          PRE_TEST_COMMANDS: ${{ inputs.pre-test-commands }}
+        run: bash -euo pipefail -c "$PRE_TEST_COMMANDS"
+
+      - name: Test
+        if: inputs.test
+        run: npm run --if-present test
+
+      - name: Extra scripts
+        if: inputs.extra-scripts != ''
+        env:
+          EXTRA_SCRIPTS: ${{ inputs.extra-scripts }}
+        run: |
+          while IFS= read -r script; do
+            script="${script#"${script%%[![:space:]]*}"}"
+            script="${script%"${script##*[![:space:]]}"}"
+            [[ -z "$script" ]] && continue
+            if [[ ! "$script" =~ ^[A-Za-z0-9:_.@/-]+$ ]]; then
+              echo "::error::extra-scripts: invalid script name: $script"
+              exit 1
+            fi
+            echo "::group::npm run $script"
+            npm run "$script"
+            echo "::endgroup::"
+          done <<< "$EXTRA_SCRIPTS"
+
+      - name: Package contents
+        if: inputs.pack-check && strategy.job-index == 0
+        run: npm pack --dry-run --ignore-scripts
+
+  audit:
+    name: Audit
+    if: inputs.audit
+    permissions:
+      contents: read
+    uses: ./.github/workflows/dependency-audit.yml
+    with:
+      node-version: ${{ inputs.node-version }}
+      audit-command: ${{ inputs.audit-command }}
+      working-directory: ${{ inputs.working-directory }}
