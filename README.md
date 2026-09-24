@@ -23,6 +23,10 @@ caller files in each package repository up to date.
 | `release.yml` | Publishes the merged release to npm with Trusted Publishing (OIDC), then tags it and creates a GitHub release. |
 | `back-merge.yml` | Merges `main` back into `develop` after each release. |
 
+Versions, release notes and changelog entries are computed by the
+zero-dependency [release tools](docs/release-tools.md) from Conventional
+Commits.
+
 ## Security defaults
 
 Every workflow in this repository follows these rules:
