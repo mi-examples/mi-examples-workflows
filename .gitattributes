@@ -1,0 +1,3 @@
+# Workflow templates are compared byte-for-byte by the installer and drift
+# sync, so every text file is stored and checked out with LF endings.
+* text=auto eol=lf
