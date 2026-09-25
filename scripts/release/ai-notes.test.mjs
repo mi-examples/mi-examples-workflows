@@ -65,8 +65,27 @@ describe('sanitizeNotes', () => {
         '- See the docs and for details',
         '- Tracked',
         '- Thanks `@octocat` and `@org/team`, mail me at a@b.com',
-        '- Supports `Array\\<string>` and \\<img src=x onerror=alert(1)>',
+        '- Supports `Array<string>` and \\<img src=x onerror=alert(1)>',
         '- Works with `@metricinsights/pp-dev`',
+      ].join('\n'),
+    );
+  });
+
+  it('leaves code spans exactly as written', () => {
+    const notes = sanitizeNotes(
+      [
+        '- Install it with `npm install @metricinsights/qa-ai-rules@beta`',
+        '- `repository.url` is now `git+https://github.com/mi-examples/qa-ai-rules.git`, see https://evil.example',
+        '- Thanks @octocat for `@scope/pkg`',
+      ].join('\n'),
+    );
+
+    assert.equal(
+      notes,
+      [
+        '- Install it with `npm install @metricinsights/qa-ai-rules@beta`',
+        '- `repository.url` is now `git+https://github.com/mi-examples/qa-ai-rules.git`, see',
+        '- Thanks `@octocat` for `@scope/pkg`',
       ].join('\n'),
     );
   });
