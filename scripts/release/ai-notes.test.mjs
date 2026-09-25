@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildUserPrompt, callOpenAI, generateAiNotes, redactSecrets, RULES, sanitizeNotes } from './ai-notes.mjs';
+import { buildUserPrompt, callChatCompletions, generateAiNotes, redactSecrets, RULES, sanitizeNotes } from './ai-notes.mjs';
+import { AI_PROVIDERS, findProvider } from './ai-providers.mjs';
+
+const OPENAI = findProvider('openai');
+const OPENROUTER = findProvider('openrouter');
 
 const reply = (content, status = 200) =>
   new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }), { status });
@@ -111,11 +115,12 @@ describe('redactSecrets', () => {
       `token ghp_${'a'.repeat(36)}`,
       `npm_${'b'.repeat(36)}`,
       `sk-proj-${'c'.repeat(40)}`,
+      `sk-or-v1-${'d'.repeat(64)}`,
       ['AKIA', 'ABCDEFGHIJKLMNOP'].join(''),
       '-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----',
     ].join('\n');
 
-    assert.equal(redactSecrets(text), 'token [REDACTED]\n[REDACTED]\n[REDACTED]\n[REDACTED]\n[REDACTED]');
+    assert.equal(redactSecrets(text), 'token [REDACTED]\n[REDACTED]\n[REDACTED]\n[REDACTED]\n[REDACTED]\n[REDACTED]');
   });
 });
 
@@ -160,47 +165,78 @@ describe('buildUserPrompt', () => {
   });
 });
 
-describe('callOpenAI', () => {
-  const base = { apiKey: 'k', model: 'm', system: 's', user: 'u', retryDelayMs: 0 };
+describe('AI_PROVIDERS', () => {
+  it('lists each provider once, with a key, an HTTPS endpoint and a model', () => {
+    assert.equal(new Set(AI_PROVIDERS.map((provider) => provider.name)).size, AI_PROVIDERS.length);
+
+    for (const provider of AI_PROVIDERS) {
+      assert.match(provider.keyEnv, /^[A-Z_]+_API_KEY$/);
+      assert.match(provider.url, /^https:\/\/[^/]+\/.*chat\/completions$/);
+      assert.ok(provider.model);
+    }
+  });
+
+  it('keeps OpenRouter away from providers that store or train on prompts', () => {
+    assert.equal(OPENROUTER.body.provider.data_collection, 'deny');
+  });
+
+  it('rejects an unknown provider', () => {
+    assert.throws(() => findProvider('magic'), /unknown AI provider "magic" \(known: openrouter, openai\)/);
+  });
+});
+
+describe('callChatCompletions', () => {
+  const base = { provider: OPENAI, apiKey: 'k', model: 'm', system: 's', user: 'u', retryDelayMs: 0 };
 
   it('sends the model, messages and a completion token cap', async () => {
     const { impl, calls } = fakeFetch(reply('- ok'));
 
-    assert.equal(await callOpenAI({ ...base, fetchImpl: impl }), '- ok');
+    assert.equal(await callChatCompletions({ ...base, fetchImpl: impl }), '- ok');
+    assert.equal(calls[0].url, OPENAI.url);
     assert.equal(calls[0].body.model, 'm');
     assert.deepEqual(calls[0].body.messages.map((message) => message.role), ['system', 'user']);
     assert.equal(calls[0].body.max_completion_tokens, 8000);
   });
 
-  it('retries once on 5xx, network errors and empty content', async () => {
-    assert.equal(await callOpenAI({ ...base, fetchImpl: fakeFetch(new Response('down', { status: 503 }), reply('- a')).impl }), '- a');
-    assert.equal(await callOpenAI({ ...base, fetchImpl: fakeFetch(new Error('ECONNRESET'), reply('- b')).impl }), '- b');
-    assert.equal(await callOpenAI({ ...base, fetchImpl: fakeFetch(reply(''), reply('- c')).impl }), '- c');
+  it("uses the provider's endpoint, model and extra request fields", async () => {
+    const { impl, calls } = fakeFetch(reply('- ok'));
+
+    await callChatCompletions({ ...base, provider: OPENROUTER, model: undefined, fetchImpl: impl });
+    assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
+    assert.equal(calls[0].body.model, OPENROUTER.model);
+    assert.deepEqual(calls[0].body.provider, { data_collection: 'deny' });
   });
 
-  it('fails fast on a client error', async () => {
-    const { impl, calls } = fakeFetch(new Response('bad key', { status: 401 }), reply('- never'));
+  it('retries once on 5xx, network errors and empty content', async () => {
+    assert.equal(await callChatCompletions({ ...base, fetchImpl: fakeFetch(new Response('down', { status: 503 }), reply('- a')).impl }), '- a');
+    assert.equal(await callChatCompletions({ ...base, fetchImpl: fakeFetch(new Error('ECONNRESET'), reply('- b')).impl }), '- b');
+    assert.equal(await callChatCompletions({ ...base, fetchImpl: fakeFetch(reply(''), reply('- c')).impl }), '- c');
+  });
 
-    await assert.rejects(callOpenAI({ ...base, fetchImpl: impl }), /401 bad key/);
+  it('fails fast on a client error, naming the provider', async () => {
+    const { impl, calls } = fakeFetch(new Response('no credits', { status: 402 }), reply('- never'));
+
+    await assert.rejects(callChatCompletions({ ...base, provider: OPENROUTER, fetchImpl: impl }), /^Error: OpenRouter request failed: 402 no credits$/);
     assert.equal(calls.length, 1);
   });
 
   it('gives up after the retry', async () => {
     const { impl } = fakeFetch(new Response('', { status: 500 }), new Response('', { status: 500 }));
 
-    await assert.rejects(callOpenAI({ ...base, fetchImpl: impl }), /500/);
+    await assert.rejects(callChatCompletions({ ...base, fetchImpl: impl }), /OpenAI request failed: 500/);
   });
 });
 
 describe('generateAiNotes', () => {
-  const input = { apiKey: 'k', repo: 'org/pkg', version: '1.3.0', commits: [{ subject: 'feat: a', body: '' }], diff: '', retryDelayMs: 0 };
+  const input = { provider: OPENAI, apiKey: 'k', repo: 'org/pkg', version: '1.3.0', commits: [{ subject: 'feat: a', body: '' }], diff: '', retryDelayMs: 0 };
 
   it('drafts, reviews and sanitizes', async () => {
     const { impl, calls } = fakeFetch(reply('### Features\n- Draft'), reply('Sure!\n### Features\n- Reviewed'));
     const result = await generateAiNotes({ ...input, fetchImpl: impl });
 
     assert.deepEqual(result, { notes: '### Features\n\n- Reviewed', warnings: [] });
-    assert.equal(calls[0].body.model, 'gpt-5-mini');
+    assert.equal(calls[0].body.model, OPENAI.model);
+    assert.equal(calls[1].body.model, OPENAI.model);
     assert.match(calls[1].body.messages[1].content, /<untrusted-input id="[^"]+">\n### Features\n- Draft\n<\/untrusted-input/);
   });
 

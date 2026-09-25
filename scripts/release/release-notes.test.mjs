@@ -39,9 +39,37 @@ describe('buildReleaseNotes', () => {
     });
 
     assert.equal(result.source, 'ai');
+    assert.equal(result.detail, 'OpenAI, gpt-5-mini');
     assert.deepEqual(result.warnings, []);
     assert.equal(result.section, `${HEADING}\n\n### Features\n\n- Added a \`--dry-run\` flag\n`);
     assert.match(seen[0], /- feat: add --dry-run/);
+  });
+
+  it('prefers the first provider in the configured order', async () => {
+    const urls = [];
+    const result = await build({
+      env: { OPENROUTER_API_KEY: 'r', OPENAI_API_KEY: 'k', GITHUB_REPOSITORY: 'org/pkg' },
+      fetchImpl: async (url) => {
+        urls.push(url);
+
+        return aiReply('### Features\n- Added a flag');
+      },
+    });
+
+    assert.equal(result.detail, 'OpenRouter, openai/gpt-5-mini');
+    assert.ok(urls.every((url) => url.startsWith('https://openrouter.ai/')));
+  });
+
+  it('falls back to the next provider when one fails, with a warning', async () => {
+    const result = await build({
+      env: { OPENROUTER_API_KEY: 'r', OPENAI_API_KEY: 'k', GITHUB_REPOSITORY: 'org/pkg' },
+      fetchImpl: async (url) =>
+        url.startsWith('https://openrouter.ai/') ? new Response('insufficient credits', { status: 402 }) : aiReply('### Features\n- Added a flag'),
+    });
+
+    assert.equal(result.source, 'ai');
+    assert.equal(result.detail, 'OpenAI, gpt-5-mini');
+    assert.deepEqual(result.warnings, ['OpenRouter release notes failed: OpenRouter request failed: 402 insufficient credits']);
   });
 
   it('falls back to GitHub notes without a key, with a warning', async () => {
@@ -51,7 +79,7 @@ describe('buildReleaseNotes', () => {
     });
 
     assert.equal(result.source, 'github');
-    assert.match(result.warnings[0], /OPENAI_API_KEY is not set/);
+    assert.equal(result.warnings[0], 'No AI provider key is set (OPENROUTER_API_KEY, OPENAI_API_KEY), so AI release notes were skipped.');
     assert.equal(result.section, `${HEADING}\n\n### What's Changed\n* feat: add --dry-run by @dev\n`);
   });
 
@@ -67,7 +95,7 @@ describe('buildReleaseNotes', () => {
     assert.equal(result.source, 'conventional');
     assert.match(result.section, /^## \[1\.3\.0\].*\n\n### Features\n\n\* add --dry-run \(\[[0-9a-f]{7}\]/);
     assert.equal(result.warnings.length, 2);
-    assert.match(result.warnings[0], /^ai release notes failed: OpenAI request failed: 401 Incorrect API key provided: \[REDACTED\]$/);
+    assert.match(result.warnings[0], /^OpenAI release notes failed: OpenAI request failed: 401 Incorrect API key provided: \[REDACTED\]$/);
     assert.match(result.warnings[1], /^github release notes failed: GitHub generate-notes failed: 403 forbidden$/);
   });
 

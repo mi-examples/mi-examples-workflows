@@ -32,9 +32,9 @@ describe('renderCaller', () => {
   });
 
   it('adds inputs to an existing with: block', () => {
-    const rendered = renderCaller(TEMPLATES.release, { ...PIN, inputs: { prepare: { model: 'gpt-5' } } });
+    const rendered = renderCaller(TEMPLATES.release, { ...PIN, inputs: { prepare: { base: 'develop' } } });
 
-    assert.match(rendered, /      app-id: \$\{\{ vars\.WORKFLOWS_BOT_APP_ID \}\}\n      model: "gpt-5"\n    secrets:/);
+    assert.match(rendered, /      app-id: \$\{\{ vars\.WORKFLOWS_BOT_APP_ID \}\}\n      base: "develop"\n    secrets:/);
   });
 
   it('leaves GitHub expressions alone', () => {

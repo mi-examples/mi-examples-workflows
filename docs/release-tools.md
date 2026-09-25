@@ -64,13 +64,45 @@ It tries each source in `--sources` order and uses the first one that works:
 
 | Source | Needs | What it produces |
 | -- | -- | -- |
-| `ai` | `OPENAI_API_KEY` | Notes written by an OpenAI model (default `gpt-5-mini`, set with `--model`) from the commits and the diff since the previous release. |
+| `ai` | `OPENROUTER_API_KEY` or `OPENAI_API_KEY` | Notes written by an AI model from the commits and the diff since the previous release. See [AI providers](#ai-providers). |
 | `github` | `GITHUB_TOKEN`, `GITHUB_REPOSITORY` | GitHub's generated "What's Changed" list of merged pull requests. |
 | `conventional` | nothing | Conventional-commit notes grouped by type. This source always works. |
 
 Every skipped or failed source adds a line to the `warnings` output. The
 workflow shows these lines in the pull request, so reviewers know which source
-they are looking at.
+they are looking at. For AI notes the `source` output also names the provider
+and the model, e.g. `ai (OpenRouter, openai/gpt-5-mini)`.
+
+### AI providers
+
+The providers, their order and their models are set in one place,
+[`scripts/release/ai-providers.mjs`](../scripts/release/ai-providers.mjs),
+for every package repository at once. Package repositories only pass the API
+keys; they don't choose a provider or a model.
+
+| Order | Provider | Key | Model |
+| -- | -- | -- | -- |
+| 1 | OpenRouter | `OPENROUTER_API_KEY` | `openai/gpt-5-mini` |
+| 2 | OpenAI | `OPENAI_API_KEY` | `gpt-5-mini` |
+
+- **Order.** A provider without a key is skipped. When a provider's call
+  fails (bad key, no credits, outage), the next provider is tried and a
+  warning is added. Only when every provider is skipped or has failed do the
+  notes come from GitHub.
+- **Same API.** Both providers use the OpenAI Chat Completions API, so the
+  prompts, the limits and the protections below are the same for both.
+- **OpenRouter data policy.** Requests to OpenRouter set
+  `provider.data_collection: "deny"`, so they are only routed to providers
+  that don't store or train on prompts. OpenRouter itself doesn't log prompts
+  unless the account opts in.
+- **Changing the provider or the model.** Edit `ai-providers.mjs` and release
+  this repository. Drift sync and Dependabot move the package repositories to
+  that release. OpenRouter model IDs carry the vendor, e.g. `openai/…` or
+  `anthropic/…`.
+- **Trying another model locally.** Use
+  `release-notes --provider <name> --model <id>` with the provider's key in
+  the environment. These flags are for experiments; the workflow doesn't use
+  them.
 
 ### How the AI notes are protected
 
