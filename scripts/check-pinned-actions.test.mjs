@@ -29,6 +29,11 @@ describe('checkContent', () => {
     assert.deepEqual(checkContent('    uses: $/.github/workflows/dependency-audit.yml', 'a.yml'), []);
   });
 
+  it('accepts the render placeholders of caller templates, and only together', () => {
+    assert.deepEqual(checkContent('    uses: org/repo/.github/workflows/x.yml@{{sha}} # {{version}}', 't.yml'), []);
+    assert.equal(checkContent('    uses: org/repo/.github/workflows/x.yml@{{sha}} # v1', 't.yml').length, 1);
+  });
+
   it('rejects a tag', () => {
     const [problem] = checkContent('      - uses: actions/checkout@v7', 'a.yml');
 

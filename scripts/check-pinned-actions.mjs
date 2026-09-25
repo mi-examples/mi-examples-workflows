@@ -52,6 +52,9 @@ export function checkContent(content, file) {
 
     const pin = ref.slice(at + 1);
 
+    // Caller templates are pinned when rendered (scripts/callers/render.mjs).
+    if (pin === '{{sha}}' && comment === '{{version}}') return;
+
     if (!SHA_RE.test(pin)) {
       problems.push(`${location}: must be pinned by full commit SHA, got "${pin}": ${ref}`);
     } else if (!comment || !VERSION_COMMENT_RE.test(comment)) {

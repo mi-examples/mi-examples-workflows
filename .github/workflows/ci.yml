@@ -38,6 +38,20 @@ jobs:
       - name: Run actionlint
         run: '"$RUNNER_TEMP/actionlint" -color'
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Render the caller templates
+        run: node scripts/callers/render-fixture.mjs "$RUNNER_TEMP/rendered"
+
+      - name: Run actionlint on the rendered callers
+        run: |
+          for variant in with-inputs defaults; do
+            "$RUNNER_TEMP/actionlint" -color "$RUNNER_TEMP"/rendered/$variant/.github/workflows/*.yml
+          done
+
   zizmor:
     name: zizmor
     runs-on: ubuntu-latest
@@ -66,6 +80,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: '"$RUNNER_TEMP/zizmor" --format=github .'
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Render the caller templates
+        run: node scripts/callers/render-fixture.mjs "$RUNNER_TEMP/rendered"
+
+      - name: Run zizmor on the rendered callers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: '"$RUNNER_TEMP/zizmor" --format=github "$RUNNER_TEMP/rendered"'
 
   test:
     name: Tests and pin check

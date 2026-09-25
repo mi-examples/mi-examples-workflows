@@ -33,6 +33,20 @@ Versions, release notes and changelog entries are computed by the
 zero-dependency [release tools](docs/release-tools.md) from Conventional
 Commits.
 
+## Installation
+
+In a package repository:
+
+```sh
+npx github:mi-examples/mi-examples-workflows --release
+```
+
+This installs the callers (CI, secret scan, dependency audit and, with
+`--release`, the release flow), pinned to the latest release. The
+repository's own settings go into `.github/mi-examples-workflows.json`. Drift
+sync then opens a pull request whenever a new release changes the callers.
+See [Installing and updating the callers](docs/workflows.md#installing-and-updating-the-callers).
+
 ## Security defaults
 
 Every workflow in this repository follows these rules:

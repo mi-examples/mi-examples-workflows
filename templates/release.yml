@@ -1,0 +1,60 @@
+name: Release
+
+# Shared release flow: https://github.com/mi-examples/mi-examples-workflows/blob/main/docs/workflows.md#release-workflows
+# The npm trusted publisher is registered for this filename, so don't rename it.
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    uses: mi-examples/mi-examples-workflows/.github/workflows/prepare-release.yml@{{sha}} # {{version}}
+    with:
+      app-id: ${{ vars.WORKFLOWS_BOT_APP_ID }}
+      {{inputs:prepare}}
+    secrets:
+      app-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}
+      openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  beta:
+    name: Beta
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    permissions:
+      contents: write # tags and GitHub releases
+      id-token: write # npm Trusted Publishing (OIDC)
+    uses: mi-examples/mi-examples-workflows/.github/workflows/release-beta.yml@{{sha}} # {{version}}
+    {{with:publish}}
+
+  release:
+    name: Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write # tags and GitHub releases
+      id-token: write # npm Trusted Publishing (OIDC)
+    uses: mi-examples/mi-examples-workflows/.github/workflows/release.yml@{{sha}} # {{version}}
+    {{with:publish}}
+
+  back-merge:
+    name: Back-merge
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    permissions:
+      contents: read
+    uses: mi-examples/mi-examples-workflows/.github/workflows/back-merge.yml@{{sha}} # {{version}}
+    with:
+      app-id: ${{ vars.WORKFLOWS_BOT_APP_ID }}
+      version: ${{ needs.release.outputs.version }}
+    secrets:
+      app-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}

@@ -1,0 +1,21 @@
+name: CI
+
+# Shared pull-request CI: https://github.com/mi-examples/mi-examples-workflows/blob/main/docs/workflows.md#node-ciyml
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: CI
+    permissions:
+      contents: read
+    uses: mi-examples/mi-examples-workflows/.github/workflows/node-ci.yml@{{sha}} # {{version}}
+    {{with:ci}}
