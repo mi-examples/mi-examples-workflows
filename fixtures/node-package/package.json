@@ -1,0 +1,17 @@
+{
+  "name": "@fixtures/node-package",
+  "version": "1.0.0",
+  "description": "Minimal package used by this repository's CI to exercise node-ci.yml",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "lint": "node --check src/index.mjs",
+    "build": "node build.mjs",
+    "test": "node check.mjs",
+    "test:extra": "node -e \"console.log('extra script ran with FIXTURE_FLAG=' + process.env.FIXTURE_FLAG)\""
+  }
+}

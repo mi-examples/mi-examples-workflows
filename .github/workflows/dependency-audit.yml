@@ -1,0 +1,57 @@
+name: Dependency audit
+
+# Runs `npm audit` against the lockfile. Called on a weekly schedule by the
+# package repos, and by node-ci.yml on every pull request.
+#
+# The caller job needs `permissions: contents: read`.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version used to run the audit.
+        type: string
+        default: '24'
+      audit-command:
+        description: Command that performs the audit.
+        type: string
+        default: npm audit --audit-level=high
+      install:
+        description: Run `npm ci --ignore-scripts` before the audit. Only needed when audit-command runs project code.
+        type: boolean
+        default: false
+      working-directory:
+        description: Directory containing package.json and package-lock.json.
+        type: string
+        default: .
+
+permissions: {}
+
+jobs:
+  audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager-cache: false
+
+      - name: Install dependencies
+        if: inputs.install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Audit
+        env:
+          AUDIT_COMMAND: ${{ inputs.audit-command }}
+        run: bash -euo pipefail -c "$AUDIT_COMMAND"

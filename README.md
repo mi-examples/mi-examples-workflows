@@ -7,21 +7,22 @@ A CI or release fix is made once here and reaches every package through
 reusable workflows (`on: workflow_call`) and an `npx` installer that keeps the
 caller files in each package repository up to date.
 
-> **Status:** under construction. The workflows below are planned and not
-> ready for use yet. Don't reference this repository from other repositories
-> until the first `v1.0.0` release.
+> **Status:** under construction. Until `v1.0.0`, only pilot package
+> repositories use these workflows, and inputs may still change.
 
-## Planned workflows
+## Workflows
 
-| Workflow | Purpose |
-| -- | -- |
-| `node-ci.yml` | `npm ci`, then lint, typecheck, build, test and `npm audit` on pull requests. |
-| `secret-scan.yml` | gitleaks on pull requests. |
-| `dependency-audit.yml` | Weekly `npm audit` on the default branch. |
-| `release-beta.yml` | Publishes `X.Y.Z-beta.N` to npm under the `beta` dist-tag on every push to `develop`. |
-| `prepare-release.yml` | Opens a release pull request into `main` with the version bump and a reviewed changelog entry. |
-| `release.yml` | Publishes the merged release to npm with Trusted Publishing (OIDC), then tags it and creates a GitHub release. |
-| `back-merge.yml` | Merges `main` back into `develop` after each release. |
+See [docs/workflows.md](docs/workflows.md) for caller examples and all inputs.
+
+| Workflow | Purpose | Status |
+| -- | -- | -- |
+| `node-ci.yml` | `npm ci`, then lint, typecheck, build, test and `npm audit` on pull requests. | available |
+| `secret-scan.yml` | gitleaks on pull requests. | available |
+| `dependency-audit.yml` | Weekly `npm audit` on the default branch. | available |
+| `release-beta.yml` | Publishes `X.Y.Z-beta.N` to npm under the `beta` dist-tag on every push to `develop`. | planned |
+| `prepare-release.yml` | Opens a release pull request into `main` with the version bump and a reviewed changelog entry. | planned |
+| `release.yml` | Publishes the merged release to npm with Trusted Publishing (OIDC), then tags it and creates a GitHub release. | planned |
+| `back-merge.yml` | Merges `main` back into `develop` after each release. | planned |
 
 Versions, release notes and changelog entries are computed by the
 zero-dependency [release tools](docs/release-tools.md) from Conventional

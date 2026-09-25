@@ -88,3 +88,26 @@ jobs:
 
       - name: Every action and reusable workflow is SHA-pinned
         run: node scripts/check-pinned-actions.mjs
+
+  # Exercise the reusable workflows from this commit, the same way a package
+  # repo's caller would.
+  self-test-node-ci:
+    name: Self-test node-ci
+    permissions:
+      contents: read
+    uses: ./.github/workflows/node-ci.yml
+    with:
+      working-directory: fixtures/node-package
+      node-matrix: '["22", "24"]'
+      dist-dir: dist
+      pre-test-commands: test -f dist/index.mjs
+      extra-scripts: |
+        test:extra
+      env-vars: |
+        FIXTURE_FLAG=on
+
+  self-test-secret-scan:
+    name: Self-test secret-scan
+    permissions:
+      contents: read
+    uses: ./.github/workflows/secret-scan.yml
