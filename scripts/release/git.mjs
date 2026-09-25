@@ -29,6 +29,46 @@ export function readCommits(range, cwd) {
     });
 }
 
+// Files that add noise or could hold credentials, excluded from diffs that
+// are sent to an AI model.
+const DIFF_EXCLUDES = [
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  '*.lock',
+  'dist/**',
+  'build/**',
+  'coverage/**',
+  '*.min.js',
+  '*.map',
+  '.env*',
+  '*.pem',
+  '*.key',
+  '*.p12',
+  '*.pfx',
+];
+
+// Text diff for `range`, or '' if git fails (e.g. the diff exceeds maxBuffer).
+export function readDiff(range, cwd) {
+  const pathspecs = DIFF_EXCLUDES.map((pattern) => `:(exclude,glob)**/${pattern}`);
+
+  try {
+    return execFileSync('git', ['diff', '--no-color', '--no-ext-diff', '--end-of-options', range, '--', '.', ...pathspecs], {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: 50 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch {
+    return '';
+  }
+}
+
+export function resolveRef(ref, cwd) {
+  return git(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], cwd);
+}
+
 // Tags starting with `v`. With `mergedInto`, only tags reachable from that ref.
 export function listTags(cwd, { mergedInto } = {}) {
   const args = ['tag', '--list', 'v*'];
