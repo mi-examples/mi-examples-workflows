@@ -136,7 +136,7 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           name="$(node -p "require('./package.json').name")"
-          for attempt in $(seq 1 24); do
+          for _ in $(seq 1 24); do
             if npm view "$name@$VERSION" version >/dev/null 2>&1; then
               echo "$name@$VERSION is available."
               exit 0
