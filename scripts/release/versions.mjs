@@ -107,6 +107,18 @@ export function nextBeta({ cwd, ref = 'HEAD' } = {}) {
     };
   }
 
+  // The level is computed from every commit since the last production
+  // release, but a new beta also needs something releasable since the
+  // previous beta. Otherwise every push after one `fix` (docs, ci, ...)
+  // would publish another identical beta.
+  if (previousTag && parseVersion(previousTag).prerelease) {
+    const sinceBeta = readCommits(`${previousTag}..${ref}`, cwd).map(parseCommit);
+
+    if (!releaseLevel(sinceBeta)) {
+      return { ...next, version: null, level: null, baseVersion: null, previousTag, alreadyTagged: false };
+    }
+  }
+
   const existing = betaNumbers(listTags(cwd));
   const number = existing.length > 0 ? Math.max(...existing) + 1 : 1;
 

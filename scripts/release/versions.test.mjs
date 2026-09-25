@@ -166,6 +166,24 @@ describe('nextBeta', () => {
     assert.equal(second.previousTag, 'v1.3.0-beta.1');
   });
 
+  it('publishes no new beta when nothing releasable landed since the previous beta', () => {
+    repo.commit('chore: init');
+    repo.tag('v1.2.0');
+    repo.commit('fix: a');
+    repo.tag('v1.2.1-beta.1');
+    repo.commit('ci: pin workflows');
+    repo.commit('docs: readme');
+
+    const quiet = nextBeta({ cwd: repo.dir });
+
+    assert.equal(quiet.version, null);
+    assert.equal(quiet.previousTag, 'v1.2.1-beta.1');
+
+    repo.commit('fix: b');
+
+    assert.equal(nextBeta({ cwd: repo.dir }).version, '1.2.1-beta.2');
+  });
+
   it('numbers after beta tags on other branches too', () => {
     repo.commit('chore: init');
     repo.tag('v1.2.0');
