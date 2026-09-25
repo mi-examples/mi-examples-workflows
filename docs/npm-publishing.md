@@ -142,21 +142,27 @@ npm trust list @metricinsights/<package>
 ### Adding the environment to an existing package
 
 The packages that already publish with OIDC have a trusted publisher without
-an environment. A package can have up to 10 configurations, so you can switch
-it without a failed release:
+an environment. npm doesn't let you add the environment-scoped configuration
+next to it. A configuration without an environment matches tokens from every
+environment, so the two would overlap, and `npm trust github` fails with
+`E409 ... a trusted publisher configuration that a token could also match
+already exists`. Replace it instead:
 
 1. Create the `npm-publish` environment (step 3).
 2. Move the repository to the shared release workflow, which runs its publish
-   job in `npm-publish`.
-3. Add a second trusted publisher **with** the environment, as described above.
-4. Release once and check the result.
-5. Revoke the old configuration without the environment. Until you do,
-   publishing from any branch is still possible.
+   job in `npm-publish`, and release once.
+3. Revoke the old configuration, then add the new one right away:
 
    ```sh
    npm trust list @metricinsights/<package>
    npm trust revoke @metricinsights/<package> --id=<id of the configuration without an environment>
+   npm trust github @metricinsights/<package> --file release.yml --repo mi-examples/<repo> --env npm-publish --allow-publish
+   npm trust list @metricinsights/<package>
    ```
+
+Between the two commands, nothing can publish with OIDC. Don't do this while
+a release is running. Once the new configuration is in place, a publish from
+any branch other than those allowed by `npm-publish` is rejected.
 
 ### Renaming the caller workflow
 
@@ -187,6 +193,7 @@ provenance** for it. This is an npm limitation, not a misconfiguration.
 | CI publish fails with `E404 Not Found - PUT https://registry.npmjs.org/...` | The trusted publisher doesn't match: repository, workflow filename or environment differ; `id-token: write` is missing in the caller job; or **npm publish** isn't allowed. |
 | CI publish fails with `ENEEDAUTH` or `E401` | A token in `NODE_AUTH_TOKEN` or `.npmrc` interferes with OIDC, or npm is older than 11.5.1. |
 | A publish from a feature branch succeeds | The trusted publisher has no environment. See step 3 and [Adding the environment](#adding-the-environment-to-an-existing-package). |
+| `npm trust github` fails with `E409 ... a token could also match` | An existing configuration overlaps, usually one without an environment. Revoke it first, see [Adding the environment](#adding-the-environment-to-an-existing-package). |
 | A local `npm unpublish`, `npm deprecate` or `npm trust` returns `404` on `PUT` | You are logged in with an account that doesn't own the package. Check `npm whoami` and `npm owner ls @metricinsights/<package>`. |
 | `npm view` doesn't show a version that was just published | The registry takes from about 20 seconds up to a few minutes. Unpublishing is also slow to show. |
 | `npm warn publish ... auto-corrected some errors in your package.json` | Run `npm pkg fix` and commit the result. |
