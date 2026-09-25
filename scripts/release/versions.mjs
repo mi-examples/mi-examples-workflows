@@ -2,7 +2,7 @@
 // commits. Needs the full history and all tags (checkout with fetch-depth: 0).
 
 import { parseCommit, releaseLevel } from './commits.mjs';
-import { listTags, readCommits, tagsPointingAt } from './git.mjs';
+import { listTags, readCommits, readFileAt, tagsPointingAt } from './git.mjs';
 import { bumpVersion, compareVersions, formatVersion, parseVersion } from './semver.mjs';
 
 function versionTags(tags) {
@@ -19,6 +19,31 @@ function newestRelease(tags) {
 // Newest production tag (vX.Y.Z) reachable from `ref`.
 export function lastRelease({ cwd, ref = 'HEAD' } = {}) {
   return newestRelease(listTags(cwd, { mergedInto: ref }));
+}
+
+// State of the package.json version on `ref`, used by the release on main:
+//   prerelease  package.json holds a prerelease, so there is nothing to release
+//   released    the version's tag already exists
+//   new         no tag yet, and newer than the last release (or the first one)
+//   stale       no tag, but not newer than the last release
+export function releaseStatus({ cwd, ref = 'HEAD' } = {}) {
+  const raw = JSON.parse(readFileAt(ref, 'package.json', cwd)).version;
+  const parsed = parseVersion(raw);
+
+  if (!parsed) throw new Error(`package.json on ${ref} has an invalid version: ${raw}`);
+
+  const version = formatVersion(parsed);
+  const tag = `v${version}`;
+  const tagExists = listTags(cwd).includes(tag);
+  const last = lastRelease({ cwd, ref });
+  let state;
+
+  if (parsed.prerelease) state = 'prerelease';
+  else if (tagExists) state = 'released';
+  else if (!last || compareVersions(parsed, last.version) > 0) state = 'new';
+  else state = 'stale';
+
+  return { version, tag, tagExists, lastTag: last?.tag ?? null, state };
 }
 
 export function nextVersion({ cwd, ref = 'HEAD' } = {}) {

@@ -1,0 +1,176 @@
+name: Release beta
+
+# Publishes X.Y.Z-beta.N to npm under the `beta` dist-tag on every push to
+# develop, then creates the vX.Y.Z-beta.N tag and a GitHub prerelease.
+#
+# Nothing is committed back, so there are no `[skip ci]` commits. The version
+# comes from the release tools: the next production version from conventional
+# commits since the last vX.Y.Z tag, plus the next free beta number. A push
+# without releasable commits (only docs, ci, chore, ...) publishes nothing.
+#
+# Re-running is safe: a version that is already on npm is not published
+# again, and an existing GitHub release is left alone.
+#
+# The caller job needs `permissions: contents: write` and `id-token: write`,
+# and the caller file must be the one registered as the npm trusted publisher
+# (release.yml).
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version used to build and publish.
+        type: string
+        default: '24'
+      build-script:
+        description: Name of the build script, run with `npm run --if-present`.
+        type: string
+        default: build
+      test:
+        description: Run `npm test` before publishing, if the script exists.
+        type: boolean
+        default: true
+      environment:
+        description: GitHub environment of the publish job. The npm trusted publisher should name it.
+        type: string
+        default: npm-publish
+      access:
+        description: npm access level for the publish.
+        type: string
+        default: public
+
+permissions: {}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.next.outputs.release }}
+      version: ${{ steps.next.outputs.version }}
+      previous-tag: ${{ steps.next.outputs.previous-tag }}
+      published: ${{ steps.npm.outputs.published }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: $/.github/actions/release-tools
+        id: tools
+
+      - name: Next beta version
+        id: next
+        env:
+          RELEASE_CLI: ${{ steps.tools.outputs.cli }}
+        run: node "$RELEASE_CLI" next-beta
+
+      - name: Already on npm?
+        id: npm
+        if: steps.next.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::$name@$VERSION is already on npm; only the GitHub release is checked."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    name: Publish to npm
+    needs: plan
+    if: needs.plan.outputs.release == 'true' && needs.plan.outputs.published != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: npm-publish-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # OIDC token for npm Trusted Publishing, only in this job
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Set version
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
+
+      - name: Build
+        env:
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+        run: npm run --if-present "$BUILD_SCRIPT"
+
+      - name: Test
+        if: inputs.test
+        run: npm run --if-present test
+
+      - name: Publish
+        env:
+          ACCESS: ${{ inputs.access }}
+        run: npm publish --tag beta --access "$ACCESS"
+
+      - name: Wait for the registry
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          for _ in $(seq 1 24); do
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+              echo "$name@$VERSION is available."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::warning::$name@$VERSION was published but is not visible on the registry yet."
+
+  github-release:
+    name: GitHub prerelease
+    needs: [plan, publish]
+    if: >-
+      always() && needs.plan.outputs.release == 'true' &&
+      (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && needs.plan.outputs.published == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # creates the vX.Y.Z-beta.N tag and the GitHub prerelease
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: $/.github/actions/release-tools
+        id: tools
+
+      - name: Create the tag and prerelease
+        env:
+          RELEASE_CLI: ${{ steps.tools.outputs.cli }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          PREVIOUS_TAG: ${{ needs.plan.outputs.previous-tag }}
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists."
+            exit 0
+          fi
+          node "$RELEASE_CLI" notes --version "$VERSION" --from "$PREVIOUS_TAG" --output "$RUNNER_TEMP/notes.md"
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --prerelease --notes-file "$RUNNER_TEMP/notes.md"

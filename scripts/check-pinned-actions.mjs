@@ -30,8 +30,9 @@ export function checkContent(content, file) {
     const [, , ref, comment] = match;
     const location = `${file}:${index + 1}`;
 
-    // Local actions and workflows resolve inside the same repo and commit.
-    if (ref.startsWith('./')) return;
+    // Local (`./`) and self-repository (`$/`) references resolve inside this
+    // repo at the commit that is running.
+    if (ref.startsWith('./') || ref.startsWith('$/')) return;
 
     if (ref.startsWith('docker://')) {
       if (!DOCKER_DIGEST_RE.test(ref)) {

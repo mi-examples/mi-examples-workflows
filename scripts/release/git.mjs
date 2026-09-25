@@ -65,6 +65,10 @@ export function readDiff(range, cwd) {
   }
 }
 
+export function readFileAt(ref, path, cwd) {
+  return git(['show', '--end-of-options', `${ref}:${path}`], cwd);
+}
+
 export function resolveRef(ref, cwd) {
   return git(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], cwd);
 }

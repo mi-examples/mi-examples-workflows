@@ -95,7 +95,7 @@ jobs:
     name: Self-test node-ci
     permissions:
       contents: read
-    uses: ./.github/workflows/node-ci.yml
+    uses: $/.github/workflows/node-ci.yml
     with:
       working-directory: fixtures/node-package
       node-matrix: '["22", "24"]'
@@ -110,4 +110,4 @@ jobs:
     name: Self-test secret-scan
     permissions:
       contents: read
-    uses: ./.github/workflows/secret-scan.yml
+    uses: $/.github/workflows/secret-scan.yml

@@ -1,7 +1,0 @@
-rules:
-  # zizmor recommends the self-repository syntax (`uses: $/...`) over `./`.
-  # actionlint 1.7.12 doesn't accept `$/` yet, and `./` in a job-level `uses:`
-  # already resolves to this repository at the called commit. Re-enable once
-  # actionlint supports `$/`.
-  self-repository:
-    disable: true

@@ -150,3 +150,193 @@ jobs:
 | `audit-command` | `npm audit --audit-level=high` | Command that performs the audit. |
 | `install` | `false` | Run `npm ci --ignore-scripts` first. Only needed when `audit-command` runs project code. |
 | `working-directory` | `.` | Directory containing `package.json` and `package-lock.json`. |
+
+## Release workflows
+
+The release flow uses five reusable workflows, all called from **one caller
+file per package repository, `.github/workflows/release.yml`**. npm matches
+the trusted publisher on that filename, so don't rename it. See
+[npm-publishing.md](npm-publishing.md) for the one-time npm and GitHub setup.
+
+| Trigger in the package repository | Reusable workflow | What happens |
+| -- | -- | -- |
+| push to `develop` | `release-beta.yml` | publishes `X.Y.Z-beta.N` under the `beta` dist-tag, then tags it and creates a GitHub prerelease |
+| manual run (`workflow_dispatch`) | `prepare-release.yml` | opens the release pull request `release/vX.Y.Z → main` with the version bump and the CHANGELOG entry |
+| push to `main` (merging the release pull request) | `release.yml` | publishes `X.Y.Z` under `latest`, then tags it and creates the GitHub release from the CHANGELOG entry |
+| after a release | `back-merge.yml` | opens a pull request `main → develop` with auto-merge on |
+| pull requests into `develop`, and pushes to `develop` | `main-ahead-check.yml` | fails pull requests while `main` has commits that `develop` lacks; re-runs them after the back-merge |
+
+A repository without `develop` (main-only) works the same way. The release
+pull request is cut from `main`, and there are no betas and no back-merge.
+
+Nothing is ever committed back by CI and no commit uses `[skip ci]`, so every
+pull request, including the release pull request, gets full CI. Publish jobs
+run in the `npm-publish` environment, and they are the only jobs with
+`id-token: write`.
+
+### Caller: release.yml
+
+```yaml
+# .github/workflows/release.yml. The npm trusted publisher is registered
+# for this filename, so don't rename it.
+name: Release
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    uses: mi-examples/mi-examples-workflows/.github/workflows/prepare-release.yml@<sha> # vX.Y.Z
+    with:
+      app-id: ${{ vars.WORKFLOWS_BOT_APP_ID }}
+    secrets:
+      app-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}
+      openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+
+  beta:
+    name: Beta
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    permissions:
+      contents: write
+      id-token: write
+    uses: mi-examples/mi-examples-workflows/.github/workflows/release-beta.yml@<sha> # vX.Y.Z
+
+  release:
+    name: Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      id-token: write
+    uses: mi-examples/mi-examples-workflows/.github/workflows/release.yml@<sha> # vX.Y.Z
+
+  back-merge:
+    name: Back-merge
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    permissions:
+      contents: read
+    uses: mi-examples/mi-examples-workflows/.github/workflows/back-merge.yml@<sha> # vX.Y.Z
+    with:
+      app-id: ${{ vars.WORKFLOWS_BOT_APP_ID }}
+      version: ${{ needs.release.outputs.version }}
+    secrets:
+      app-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}
+```
+
+In repositories with a `develop` branch, add the main-ahead check as its own
+caller file:
+
+```yaml
+# .github/workflows/main-ahead-check.yml
+name: Main ahead check
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+permissions: {}
+
+jobs:
+  main-ahead:
+    name: Main ahead check
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write # re-runs failed checks once develop is up to date
+    uses: mi-examples/mi-examples-workflows/.github/workflows/main-ahead-check.yml@<sha> # vX.Y.Z
+```
+
+### release-beta.yml and release.yml
+
+The two publishing workflows have the same inputs:
+
+| Input | Default | Description |
+| -- | -- | -- |
+| `node-version` | `24` | Node.js version used to build and publish. |
+| `build-script` | `build` | Build script, run with `npm run --if-present`. |
+| `test` | `true` | Run `npm test` before publishing, if the script exists. |
+| `environment` | `npm-publish` | GitHub environment of the publish job. The npm trusted publisher should name it. |
+| `access` | `public` | npm access level. |
+
+`release.yml` has two outputs, `released` (`"true"` when a new release was
+created) and `version`.
+
+- **When `release.yml` publishes.** It publishes only when the `package.json`
+  version on `main` has no `vX.Y.Z` tag yet and is newer than the last
+  release. Every other push to `main` does nothing. A version that isn't newer
+  and has no tag fails the run, so a mistake in the release pull request is
+  caught.
+- **When `release-beta.yml` publishes.** It publishes nothing when there are
+  no `feat`, `fix`, `perf`, `revert` or breaking commits since the last
+  release. It fails when a newer release on `main` hasn't been merged back
+  into `develop` yet.
+- **Re-running.** Both workflows are safe to re-run: a version that is
+  already on npm, or a release that already exists, is skipped.
+
+### prepare-release.yml
+
+Run it from the **Actions** tab (**Release → Run workflow**). It works like
+this:
+
+1. It computes the next version from the conventional commits since the last
+   release.
+2. It bumps `package.json` and `package-lock.json`.
+3. It writes the CHANGELOG entry. The notes come from AI when
+   `OPENAI_API_KEY` is set, otherwise from GitHub, otherwise from the
+   conventional commits.
+4. It opens the release pull request with the GitHub App token, so CI runs on
+   it.
+
+The pull request lists which notes source was used, with any warnings. Review
+and edit the CHANGELOG entry before merging.
+
+| Input | Default | Description |
+| -- | -- | -- |
+| `app-id` | required | ID of the GitHub App (`vars.WORKFLOWS_BOT_APP_ID`). |
+| `base` | `''` | Branch to cut the release from. Empty means `develop` if it exists, otherwise `main`. |
+| `node-version` | `24` | Node.js version for the release tools. |
+| `model` | `gpt-5-mini` | OpenAI model for the release notes. |
+
+Secrets: `app-key` (required) and `openai-api-key` (optional).
+
+### back-merge.yml
+
+It opens a pull request from `main` into `develop` using the App token, so
+`develop`'s required checks run. It then turns on auto-merge with a merge
+commit, when the repository allows auto-merge. Merge conflicts stay in the
+pull request for a person to resolve. The workflow does nothing without a
+`develop` branch, or when `develop` already contains `main`.
+
+| Input | Default | Description |
+| -- | -- | -- |
+| `app-id` | required | ID of the GitHub App. |
+| `base` | `develop` | Branch to merge into. |
+| `head` | `main` | Released branch. |
+| `version` | `''` | Released version, used in the pull request title. |
+
+Secret: `app-key` (required).
+
+### main-ahead-check.yml
+
+| Input | Default | Description |
+| -- | -- | -- |
+| `mode` | `fail` | `fail` blocks the pull request, `warn` only annotates it. |
+| `main-branch` | `main` | The production branch. |
+
+On pull requests into `develop` the check fails while `main` is ahead. The back-merge pull request itself (head `main`) always passes.
+
+On a push to `develop` it doesn't check anything. Once `develop` contains `main` again, typically right after the back-merge, it re-runs the failed checks of the open pull requests into `develop`. Nobody has to re-run them by hand.

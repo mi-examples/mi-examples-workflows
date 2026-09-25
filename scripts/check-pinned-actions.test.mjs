@@ -23,8 +23,10 @@ describe('checkContent', () => {
     assert.deepEqual(checkContent(`    uses: "actions/checkout@${SHA}" # v7`, 'a.yml'), []);
   });
 
-  it('ignores local actions and workflows', () => {
+  it('ignores local and self-repository actions and workflows', () => {
     assert.deepEqual(checkContent('      - uses: ./.github/actions/setup', 'a.yml'), []);
+    assert.deepEqual(checkContent('      - uses: $/.github/actions/release-tools', 'a.yml'), []);
+    assert.deepEqual(checkContent('    uses: $/.github/workflows/dependency-audit.yml', 'a.yml'), []);
   });
 
   it('rejects a tag', () => {

@@ -1,0 +1,109 @@
+name: Back-merge
+
+# After a production release, opens a pull request that merges main back into
+# develop, and turns on auto-merge (merge commit) when the repository allows
+# it. Without this, develop never contains the release tag, and the next beta
+# would be computed from a stale baseline.
+#
+# It opens a pull request instead of pushing to develop, so develop's
+# required checks run on the merge. The GitHub App token is used because
+# pull requests opened with GITHUB_TOKEN don't trigger CI. Merge conflicts are
+# left in the pull request for a person to resolve.
+#
+# Skipped when the repository has no develop branch, or when develop already
+# contains main.
+#
+# The caller job needs `permissions: contents: read`, and passes the App ID
+# and key.
+
+on:
+  workflow_call:
+    inputs:
+      app-id:
+        description: ID of the GitHub App that opens the pull request.
+        type: string
+        required: true
+      base:
+        description: Branch to merge main into.
+        type: string
+        default: develop
+      head:
+        description: Branch that was released.
+        type: string
+        default: main
+      version:
+        description: Released version, used in the pull request title.
+        type: string
+        default: ''
+    secrets:
+      app-key:
+        description: Private key of the GitHub App.
+        required: true
+
+permissions: {}
+
+jobs:
+  back-merge:
+    name: Back-merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Validate inputs
+        env:
+          BASE: ${{ inputs.base }}
+          HEAD: ${{ inputs.head }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          branch_re='^[A-Za-z0-9._/-]+$'
+          [[ "$BASE" =~ $branch_re && "$HEAD" =~ $branch_re ]] || { echo "::error::Invalid branch name"; exit 1; }
+          [[ -z "$VERSION" || "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Invalid version: $VERSION"; exit 1; }
+
+      - name: Mint a GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ inputs.app-id }}
+          private-key: ${{ secrets.app-key }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Open the back-merge pull request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ inputs.base }}
+          HEAD: ${{ inputs.head }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! gh api "repos/$REPO/branches/$BASE" --silent 2>/dev/null; then
+            echo "No $BASE branch; nothing to merge back."
+            exit 0
+          fi
+
+          ahead="$(gh api "repos/$REPO/compare/$BASE...$HEAD" --jq .ahead_by)"
+          if [[ "$ahead" == "0" ]]; then
+            echo "$BASE already contains $HEAD."
+            exit 0
+          fi
+
+          number="$(gh pr list --repo "$REPO" --base "$BASE" --head "$HEAD" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$number" ]]; then
+            echo "Back-merge pull request #$number is already open."
+          else
+            title="chore: merge $HEAD into $BASE${VERSION:+ after v$VERSION}"
+            body="$(printf '%s\n\n%s\n' \
+              "Merges \`$HEAD\` back into \`$BASE\` after the release, so the next beta is computed from the released version." \
+              "Opened automatically. If it has conflicts, resolve them in this pull request; don't squash, the merge commit keeps the release tag reachable from \`$BASE\`.")"
+            url="$(gh pr create --repo "$REPO" --base "$BASE" --head "$HEAD" --title "$title" --body "$body")"
+            number="${url##*/}"
+            echo "Opened $url"
+          fi
+
+          if gh pr merge "$number" --repo "$REPO" --auto --merge 2>/dev/null; then
+            echo "Auto-merge (merge commit) is on for #$number."
+          else
+            echo "::warning::Could not enable auto-merge for #$number (disabled in the repository settings, or conflicts). Merge it with a merge commit."
+          fi

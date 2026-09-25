@@ -13,6 +13,7 @@ The tools need the full history and all tags. Check out with
 | -- | -- | -- |
 | `next-version [--ref HEAD]` | Prints the next production version, or nothing when there is nothing to release. | `release`, `version`, `level`, `last-tag` |
 | `next-beta [--ref HEAD]` | Prints the next `X.Y.Z-beta.N`. | `release`, `version`, `base-version`, `level`, `last-tag`, `previous-tag`, `already-tagged` |
+| `release-status [--ref HEAD]` | Prints the state of the `package.json` version: `new` (no tag yet, newer than the last release), `released`, `prerelease`, or `stale` (no tag, not newer; exits 1). | `state`, `version`, `tag`, `tag-exists`, `last-tag` |
 | `notes --version <v> [--from <tag>] [--to HEAD]` | Conventional-commit notes for the range, grouped by type. `--from` defaults to the last production tag. | — |
 | `release-notes --version <v> [--from <tag>] [--sources ai,github,conventional]` | The full CHANGELOG section for a production release. See [Release notes](#release-notes). | `source`, `warnings` |
 | `changelog-insert --version <v> --notes-file <file>` | Inserts the section at the top of `CHANGELOG.md`, or replaces the existing section for the same version. | — |

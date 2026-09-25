@@ -1,0 +1,201 @@
+name: Prepare release
+
+# Opens the release pull request, release/vX.Y.Z → main. It:
+#   1. computes the next production version from conventional commits since
+#      the last vX.Y.Z tag;
+#   2. bumps package.json and package-lock.json;
+#   3. writes the version's CHANGELOG.md section. The notes come from the AI
+#      if OPENAI_API_KEY is set, otherwise from GitHub, otherwise from the
+#      conventional commits;
+#   4. pushes release/vX.Y.Z and opens the pull request with the GitHub App
+#      token, so CI runs on it.
+#
+# Review and edit the CHANGELOG.md section in the pull request. Merging it
+# publishes the release (release.yml).
+#
+# The release branch is cut from develop when the repository has one,
+# otherwise from main. The caller job needs `permissions: contents: read`,
+# and passes the App ID and key, plus the OpenAI key if there is one.
+
+on:
+  workflow_call:
+    inputs:
+      app-id:
+        description: ID of the GitHub App that pushes the branch and opens the pull request.
+        type: string
+        required: true
+      base:
+        description: Branch to cut the release from. Empty means develop if it exists, otherwise main.
+        type: string
+        default: ''
+      node-version:
+        description: Node.js version for the release tools and `npm version`.
+        type: string
+        default: '24'
+      model:
+        description: OpenAI model for the release notes.
+        type: string
+        default: gpt-5-mini
+    secrets:
+      app-key:
+        description: Private key of the GitHub App.
+        required: true
+      openai-api-key:
+        description: OpenAI API key. Without it, the notes come from GitHub or the conventional commits.
+        required: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Mint a GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ inputs.app-id }}
+          private-key: ${{ secrets.app-key }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Choose the base branch
+        id: base
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ inputs.base }}
+        run: |
+          if [[ -z "$BASE" ]]; then
+            if gh api "repos/$REPO/branches/develop" --silent 2>/dev/null; then BASE=develop; else BASE=main; fi
+          fi
+          [[ "$BASE" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Invalid base branch: $BASE"; exit 1; }
+          echo "branch=$BASE" >> "$GITHUB_OUTPUT"
+          echo "Cutting the release from $BASE."
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.base.outputs.branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager-cache: false
+
+      - uses: $/.github/actions/release-tools
+        id: tools
+
+      - name: Next version
+        id: next
+        env:
+          RELEASE_CLI: ${{ steps.tools.outputs.cli }}
+        run: node "$RELEASE_CLI" next-version
+
+      - name: Stop when there is nothing to release
+        if: steps.next.outputs.release != 'true'
+        env:
+          LAST_TAG: ${{ steps.next.outputs.last-tag }}
+        run: |
+          echo "::error::Nothing to release: no feat, fix, perf, revert or breaking commits since $LAST_TAG."
+          exit 1
+
+      - name: Check for an existing release branch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          branch="release/v$VERSION"
+          if gh api "repos/$REPO/branches/$branch" --silent 2>/dev/null; then
+            pr="$(gh pr list --repo "$REPO" --head "$branch" --state open --json url --jq '.[0].url // empty')"
+            echo "::error::$branch already exists${pr:+ ($pr)}. Merge or close that release first, and delete the branch to start over."
+            exit 1
+          fi
+
+      - name: Bump the version
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
+
+      - name: Write release notes
+        id: notes
+        env:
+          RELEASE_CLI: ${{ steps.tools.outputs.cli }}
+          VERSION: ${{ steps.next.outputs.version }}
+          LAST_TAG: ${{ steps.next.outputs.last-tag }}
+          MODEL: ${{ inputs.model }}
+          OPENAI_API_KEY: ${{ secrets.openai-api-key }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          node "$RELEASE_CLI" release-notes --version "$VERSION" --from "$LAST_TAG" --model "$MODEL" --output "$RUNNER_TEMP/section.md"
+          node "$RELEASE_CLI" changelog-insert --version "$VERSION" --notes-file "$RUNNER_TEMP/section.md"
+
+      - name: Commit and push the release branch
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          user_id="$(GH_TOKEN="$TOKEN" gh api "users/${APP_SLUG}[bot]" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git switch -c "release/v$VERSION"
+          git add package.json CHANGELOG.md
+          [[ -f package-lock.json ]] && git add package-lock.json
+          git commit -m "chore(release): v$VERSION"
+
+          # The token only lives in this step's environment; it is never
+          # written to .git/config.
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            git push origin "HEAD:refs/heads/release/v$VERSION"
+
+      - name: Open the release pull request
+        env:
+          RELEASE_CLI: ${{ steps.tools.outputs.cli }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ steps.next.outputs.version }}
+          LEVEL: ${{ steps.next.outputs.level }}
+          LAST_TAG: ${{ steps.next.outputs.last-tag }}
+          BASE: ${{ steps.base.outputs.branch }}
+          SOURCE: ${{ steps.notes.outputs.source }}
+          WARNINGS: ${{ steps.notes.outputs.warnings }}
+        run: |
+          body="$RUNNER_TEMP/body.md"
+          {
+            echo "Releases **v$VERSION** (a $LEVEL release after $LAST_TAG), cut from \`$BASE\`."
+            echo
+            echo "## Before merging"
+            echo
+            echo "- [ ] Review and edit the new section in \`CHANGELOG.md\`. It becomes the GitHub release notes."
+            echo "- [ ] Check that the version is right. For a different version, change it in \`package.json\`, \`package-lock.json\` and the \`CHANGELOG.md\` heading."
+            echo
+            if [[ "$BASE" == "main" ]]; then
+              echo "Merging publishes \`v$VERSION\` to npm under \`latest\` and creates the tag and the GitHub release."
+            else
+              echo "Merging publishes \`v$VERSION\` to npm under \`latest\`, creates the tag and the GitHub release, and opens the back-merge into \`$BASE\`."
+            fi
+            echo
+            echo "Release notes source: \`$SOURCE\`."
+            if [[ -n "$WARNINGS" ]]; then
+              echo
+              echo "> [!WARNING]"
+              while IFS= read -r line; do echo "> $line"; done <<< "$WARNINGS"
+            fi
+            echo
+            echo "## Release notes"
+            echo
+            node "$RELEASE_CLI" changelog-extract --version "$VERSION"
+          } > "$body"
+          gh pr create --repo "$REPO" --base main --head "release/v$VERSION" --title "chore(release): v$VERSION" --body-file "$body"
