@@ -24,6 +24,10 @@ See [docs/workflows.md](docs/workflows.md) for caller examples and all inputs.
 | `release.yml` | Publishes the merged release to npm with Trusted Publishing (OIDC), then tags it and creates a GitHub release. | planned |
 | `back-merge.yml` | Merges `main` back into `develop` after each release. | planned |
 
+Before a package can publish, it needs a one-time npm and GitHub setup:
+the first publish of a new package, the `npm-publish` environment and the
+trusted publisher. See [docs/npm-publishing.md](docs/npm-publishing.md).
+
 Versions, release notes and changelog entries are computed by the
 zero-dependency [release tools](docs/release-tools.md) from Conventional
 Commits.
