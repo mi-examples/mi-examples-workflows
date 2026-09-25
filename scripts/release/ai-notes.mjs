@@ -183,14 +183,25 @@ function canonicalTitle(heading) {
   return SECTION_TITLES[3];
 }
 
+// Applies `transform` to the text outside inline code spans only. Inside a
+// code span, URLs aren't linked, @mentions don't notify and HTML isn't
+// rendered, so it is left exactly as written.
+function outsideCodeSpans(text, transform) {
+  return text
+    .split(/(`[^`\n]*`)/)
+    .map((part, index) => (index % 2 === 1 ? part : transform(part)))
+    .join('');
+}
+
 function cleanInline(text) {
-  const cleaned = text
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<?\bhttps?:\/\/[^\s)>]+>?/g, '')
-    .replace(/</g, '\\<')
-    .replace(/(^|[^\w`\\/])@([A-Za-z0-9][A-Za-z0-9-]{0,38}(?:\/[A-Za-z0-9._-]+)?)/g, '$1`@$2`')
-    .replace(/\(\s*\)/g, '')
+  const withoutLinks = text.replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
+  const cleaned = outsideCodeSpans(withoutLinks, (part) =>
+    part
+      .replace(/<?\bhttps?:\/\/[^\s)>]+>?/g, '')
+      .replace(/</g, '\\<')
+      .replace(/(^|[^\w\\/])@([A-Za-z0-9][A-Za-z0-9-]{0,38}(?:\/[A-Za-z0-9._-]+)?)/g, '$1`@$2`')
+      .replace(/\(\s*\)/g, ''),
+  )
     .replace(/\s+/g, ' ')
     .trim();
 

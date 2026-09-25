@@ -128,7 +128,7 @@ const COMMANDS = {
       });
 
       if (result.version) console.log(result.version);
-      else console.error(`No release: no releasable commits since ${result.lastTag}.`);
+      else console.error(`No release: no releasable commits since ${result.previousTag ?? result.lastTag}.`);
     },
   },
 
