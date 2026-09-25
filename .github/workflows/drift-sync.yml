@@ -86,7 +86,7 @@ jobs:
           if [[ -n "$ONLY" ]]; then
             wanted="$(tr ',' '\n' <<< "$ONLY" | tr -d ' ' | sed '/^$/d' | sort -u)"
             unknown="$(comm -13 <(echo "$consumers") <(echo "$wanted"))"
-            [[ -z "$unknown" ]] || { echo "::error::Not a workflows consumer: $(echo $unknown)"; exit 1; }
+            [[ -z "$unknown" ]] || { echo "::error::Not a workflows consumer: $(paste -sd ' ' <<< "$unknown")"; exit 1; }
             consumers="$wanted"
           fi
           while IFS= read -r name; do
