@@ -164,7 +164,7 @@ the trusted publisher on that filename, so don't rename it. See
 | manual run (`workflow_dispatch`) | `prepare-release.yml` | opens the release pull request `release/vX.Y.Z → main` with the version bump and the CHANGELOG entry |
 | push to `main` (merging the release pull request) | `release.yml` | publishes `X.Y.Z` under `latest`, then tags it and creates the GitHub release from the CHANGELOG entry |
 | after a release | `back-merge.yml` | opens a pull request `main → develop` with auto-merge on |
-| pull requests into `develop` | `main-ahead-check.yml` | fails when `main` has commits that `develop` lacks |
+| pull requests into `develop`, and pushes to `develop` | `main-ahead-check.yml` | fails pull requests while `main` has commits that `develop` lacks; re-runs them after the back-merge |
 
 A repository without `develop` (main-only) works the same way. The release
 pull request is cut from `main`, and there are no betas and no back-merge.
@@ -235,16 +235,28 @@ jobs:
       app-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}
 ```
 
-In repositories with a `develop` branch, add the main-ahead check to the CI
-caller:
+In repositories with a `develop` branch, add the main-ahead check as its own
+caller file:
 
 ```yaml
-# .github/workflows/ci.yml, next to the ci job
+# .github/workflows/main-ahead-check.yml
+name: Main ahead check
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+permissions: {}
+
+jobs:
   main-ahead:
     name: Main ahead check
-    if: github.base_ref == 'develop'
     permissions:
       contents: read
+      pull-requests: read
+      actions: write # re-runs failed checks once develop is up to date
     uses: mi-examples/mi-examples-workflows/.github/workflows/main-ahead-check.yml@<sha> # vX.Y.Z
 ```
 
@@ -325,4 +337,6 @@ Secret: `app-key` (required).
 | `mode` | `fail` | `fail` blocks the pull request, `warn` only annotates it. |
 | `main-branch` | `main` | The production branch. |
 
-The back-merge pull request itself (head `main`) always passes.
+On pull requests into `develop` the check fails while `main` is ahead. The back-merge pull request itself (head `main`) always passes.
+
+On a push to `develop` it doesn't check anything. Once `develop` contains `main` again, typically right after the back-merge, it re-runs the failed checks of the open pull requests into `develop`. Nobody has to re-run them by hand.

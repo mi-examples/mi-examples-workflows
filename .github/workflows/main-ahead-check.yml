@@ -1,13 +1,20 @@
 name: Main ahead check
 
-# Pull-request check for PRs into develop. It fails (or warns) when main has
-# commits that develop doesn't: usually a release whose back-merge hasn't
-# been merged yet. Building on that stale develop would compute the next
-# beta from an old version.
+# Keeps develop from building on top of a stale base.
 #
-# The back-merge pull request itself (head: main) is always allowed.
+# - On a pull request into develop, it fails (or warns) while main has
+#   commits that develop doesn't. That is usually a release whose back-merge
+#   hasn't been merged yet; building on that develop would compute the next
+#   beta from an old version. The back-merge pull request itself (head: main)
+#   is always allowed.
+# - On a push to develop, once develop contains main again (typically right
+#   after the back-merge), it re-runs the failed checks of open pull requests
+#   into develop, so nobody has to re-run them by hand.
 #
-# The caller job needs `permissions: contents: read`.
+# Call it from its own caller file, triggered on `pull_request` and `push`
+# for develop. The caller job needs `permissions: contents: read`,
+# `pull-requests: read` and `actions: write` (the last one is for the
+# re-runs).
 
 on:
   workflow_call:
@@ -25,7 +32,8 @@ permissions: {}
 
 jobs:
   check:
-    name: Main ahead check
+    name: Check
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -47,10 +55,6 @@ jobs:
           [[ "$MODE" == "fail" || "$MODE" == "warn" ]] || { echo "::error::mode must be fail or warn"; exit 1; }
           [[ "$MAIN" =~ $branch_re ]] || { echo "::error::Invalid main-branch"; exit 1; }
 
-          if [[ -z "$BASE" ]]; then
-            echo "Not a pull request; nothing to check."
-            exit 0
-          fi
           if [[ "$HEAD_REF" == "$MAIN" ]]; then
             echo "This is the back-merge of $MAIN; allowed."
             exit 0
@@ -64,9 +68,56 @@ jobs:
 
           echo "$MAIN has $missing commit(s) that $BASE doesn't:"
           git log --oneline --no-decorate -n 10 "origin/$BASE..origin/$MAIN"
-          message="$MAIN is ahead of $BASE by $missing commit(s). Merge the open back-merge pull request ($MAIN → $BASE) first, or merge origin/$MAIN into this branch."
+          message="$MAIN is ahead of $BASE by $missing commit(s). Merge the open back-merge pull request ($MAIN → $BASE) first, or merge origin/$MAIN into this branch. The check re-runs by itself once $BASE is updated."
           if [[ "$MODE" == "fail" ]]; then
             echo "::error::$message"
             exit 1
           fi
           echo "::warning::$message"
+
+  recheck:
+    name: Re-run failed checks
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write # re-runs the failed check runs of open pull requests
+      pull-requests: read # lists the open pull requests into the base branch
+    steps:
+      - name: Re-run failed main-ahead checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.ref_name }}
+          MAIN: ${{ inputs.main-branch }}
+          CALLER_REF: ${{ github.workflow_ref }}
+        run: |
+          [[ "$MAIN" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Invalid main-branch"; exit 1; }
+
+          ahead="$(gh api "repos/$REPO/compare/$BASE...$MAIN" --jq .ahead_by)"
+          if [[ "$ahead" != "0" ]]; then
+            echo "$MAIN is still ahead of $BASE by $ahead commit(s); nothing to re-run yet."
+            exit 0
+          fi
+
+          # The caller workflow's file, e.g. .github/workflows/main-ahead-check.yml
+          caller_file="${CALLER_REF#"$REPO"/}"
+          caller_file="${caller_file%%@*}"
+          workflow="$(basename "$caller_file")"
+
+          gh pr list --repo "$REPO" --base "$BASE" --state open --json number,headRefName,headRefOid \
+            --jq '.[] | [.number, .headRefName, .headRefOid] | @tsv' |
+          while IFS=$'\t' read -r number head sha; do
+            run="$(gh run list --repo "$REPO" --workflow "$workflow" --event pull_request --branch "$head" --limit 20 \
+              --json databaseId,headSha,conclusion \
+              --jq "[.[] | select(.headSha == \"$sha\")][0] | select(. != null) | [.databaseId, .conclusion] | @tsv")"
+            [[ -z "$run" ]] && continue
+            IFS=$'\t' read -r id conclusion <<< "$run"
+            if [[ "$conclusion" == "failure" ]]; then
+              if gh run rerun "$id" --repo "$REPO" --failed; then
+                echo "Re-ran the failed check of #$number (run $id)."
+              else
+                echo "::warning::Could not re-run the check of #$number (run $id)."
+              fi
+            fi
+          done
