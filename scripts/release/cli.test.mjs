@@ -103,12 +103,12 @@ describe('cli', () => {
     repo.tag('v1.2.0');
     repo.commit('fix: handle spaces');
 
-    const env = { OPENAI_API_KEY: '', GITHUB_TOKEN: '', GITHUB_REPOSITORY: '', GITHUB_SERVER_URL: '' };
+    const env = { OPENROUTER_API_KEY: '', OPENAI_API_KEY: '', GITHUB_TOKEN: '', GITHUB_REPOSITORY: '', GITHUB_SERVER_URL: '' };
     const { status, stdout, outputs } = run(['release-notes', '--version', '1.2.1', '--date', '2026-09-25'], env);
 
     assert.equal(status, 0);
     assert.match(stdout, /^## 1\.2\.1 \(2026-09-25\)\n\n### Bug Fixes\n\n\* handle spaces \([0-9a-f]{7}\)\n$/);
-    assert.match(outputs, /^source=conventional\nwarnings<<(EOF_[0-9a-f-]+)\nOPENAI_API_KEY is not set.*\nGITHUB_TOKEN or GITHUB_REPOSITORY is not set.*\n\1\n$/);
+    assert.match(outputs, /^source=conventional\nwarnings<<(EOF_[0-9a-f-]+)\nNo AI provider key is set \(OPENROUTER_API_KEY, OPENAI_API_KEY\).*\nGITHUB_TOKEN or GITHUB_REPOSITORY is not set.*\n\1\n$/);
   });
 
   it('release-notes validates --sources', () => {
@@ -116,6 +116,8 @@ describe('cli', () => {
     repo.tag('v1.2.0');
 
     assert.equal(run(['release-notes', '--version', '1.2.1', '--sources', 'ai,magic']).status, 1);
+    assert.match(run(['release-notes', '--version', '1.2.1', '--provider', 'magic']).stderr, /unknown AI provider "magic"/);
+    assert.match(run(['release-notes', '--version', '1.2.1', '--model', 'x']).stderr, /--model needs --provider/);
   });
 
   it('rejects unknown commands and options', () => {

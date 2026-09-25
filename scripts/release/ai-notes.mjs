@@ -1,5 +1,6 @@
-// AI-written release notes for the production CHANGELOG entry, via the OpenAI
-// Chat Completions API. Zero dependencies: global fetch only.
+// AI-written release notes for the production CHANGELOG entry, via an OpenAI
+// Chat Completions compatible API (see ai-providers.mjs). Zero dependencies:
+// global fetch only.
 //
 // Commit messages and the diff are untrusted input (anyone who can land a
 // commit controls them), so:
@@ -12,9 +13,6 @@
 // A human still reviews the result in the release pull request.
 
 import { randomUUID } from 'node:crypto';
-
-export const DEFAULT_MODEL = 'gpt-5-mini';
-export const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
 const MAX_DIFF_CHARS = 60_000;
 const MAX_BODY_CHARS = 1_000;
@@ -104,9 +102,22 @@ export function buildUserPrompt({ repo, version, commits, diff, boundary = rando
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The model fields of a request: an explicit `model` alone, or the
+// provider's model plus its fallbacks as OpenRouter's `models` list.
+function modelFields(provider, model) {
+  if (model) return { model };
+  if (provider.fallbackModels?.length) return { models: [provider.model, ...provider.fallbackModels] };
+
+  return { model: provider.model };
+}
+
 // One retry on network errors, 429, 5xx and empty content; anything else
-// (bad key, bad request) fails immediately.
-export async function callOpenAI({ apiKey, model, system, user, url = OPENAI_URL, fetchImpl = fetch, retryDelayMs = RETRY_DELAY_MS }) {
+// (bad key, bad request) fails immediately. `provider` is an entry of
+// AI_PROVIDERS; `model` overrides the provider's models. Resolves to the
+// content and the model that actually answered.
+export async function callChatCompletions({ provider, apiKey, model, system, user, fetchImpl = fetch, retryDelayMs = RETRY_DELAY_MS }) {
+  const { label, url, body: extraBody = {} } = provider;
+  const models = modelFields(provider, model);
   let lastError;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -118,7 +129,8 @@ export async function callOpenAI({ apiKey, model, system, user, url = OPENAI_URL
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
-          model,
+          ...extraBody,
+          ...models,
           messages: [
             { role: 'system', content: system },
             { role: 'user', content: user },
@@ -128,7 +140,7 @@ export async function callOpenAI({ apiKey, model, system, user, url = OPENAI_URL
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (error) {
-      lastError = new Error(`OpenAI request failed: ${error.message}`);
+      lastError = new Error(`${label} request failed: ${error.message}`);
 
       if (retry) {
         await sleep(retryDelayMs);
@@ -141,7 +153,7 @@ export async function callOpenAI({ apiKey, model, system, user, url = OPENAI_URL
     if (!response.ok) {
       const detail = (await response.text().catch(() => '')).slice(0, 300);
 
-      lastError = new Error(`OpenAI request failed: ${response.status} ${detail}`.trim());
+      lastError = new Error(`${label} request failed: ${response.status} ${detail}`.trim());
 
       if (retry && (response.status === 429 || response.status >= 500)) {
         await sleep(retryDelayMs);
@@ -153,10 +165,13 @@ export async function callOpenAI({ apiKey, model, system, user, url = OPENAI_URL
 
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content?.trim();
+    // The answering model ends up in the release pull request, so only a
+    // plain model ID is accepted from the response.
+    const answered = /^[\w.:/-]{1,100}$/.test(data?.model ?? '') ? data.model : (models.model ?? models.models[0]);
 
-    if (content) return content;
+    if (content) return { content, model: answered };
 
-    lastError = new Error(`OpenAI response had no content (finish_reason: ${data?.choices?.[0]?.finish_reason ?? 'unknown'})`);
+    lastError = new Error(`${label} response had no content (finish_reason: ${data?.choices?.[0]?.finish_reason ?? 'unknown'})`);
 
     if (retry) {
       await sleep(retryDelayMs);
@@ -250,19 +265,22 @@ export function sanitizeNotes(text) {
 
 // Draft, then a review pass against the same rules. A failed review falls back
 // to the draft. Throws when the draft fails or nothing usable is left.
-export async function generateAiNotes({ apiKey, model = DEFAULT_MODEL, repo, version, commits, diff, url, fetchImpl, retryDelayMs }) {
-  const call = (system, user) => callOpenAI({ apiKey, model, system, user, url, fetchImpl, retryDelayMs });
+export async function generateAiNotes({ provider, apiKey, model, repo, version, commits, diff, fetchImpl, retryDelayMs }) {
+  const call = (system, user) => callChatCompletions({ provider, apiKey, model, system, user, fetchImpl, retryDelayMs });
   const warnings = [];
-  const draft = await call(RULES, buildUserPrompt({ repo, version, commits, diff }));
+  const { content: draft, model: draftModel } = await call(RULES, buildUserPrompt({ repo, version, commits, diff }));
   let notes = draft;
+  let answeredBy = draftModel;
 
   try {
     const boundary = randomUUID();
-
-    notes = await call(
+    const review = await call(
       REVIEW_PROMPT,
       `Rules:\n${RULES}\n\n<untrusted-input id="${boundary}">\n${draft.replaceAll(boundary, '')}\n</untrusted-input id="${boundary}">`,
     );
+
+    notes = review.content;
+    answeredBy = review.model;
   } catch (error) {
     warnings.push(`AI review pass failed, using the unreviewed draft: ${error.message}`);
   }
@@ -271,5 +289,5 @@ export async function generateAiNotes({ apiKey, model = DEFAULT_MODEL, repo, ver
 
   if (!sanitized) throw new Error('the AI response contained no usable release notes');
 
-  return { notes: sanitized, warnings };
+  return { notes: sanitized, warnings, model: answeredBy };
 }

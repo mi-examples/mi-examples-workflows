@@ -268,6 +268,7 @@ jobs:
       app-id: ${{ vars.WORKFLOWS_BOT_APP_ID }}
     secrets:
       app-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}
+      openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
       openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 
   beta:
@@ -360,9 +361,11 @@ this:
 1. It computes the next version from the conventional commits since the last
    release.
 2. It bumps `package.json` and `package-lock.json`.
-3. It writes the CHANGELOG entry. The notes come from AI when
-   `OPENAI_API_KEY` is set, otherwise from GitHub, otherwise from the
-   conventional commits.
+3. It writes the CHANGELOG entry. The notes come from an AI provider when
+   its key is passed, otherwise from GitHub, otherwise from the conventional
+   commits. The providers, their order and the models are set centrally in
+   this repository, not in the caller. See
+   [AI providers](release-tools.md#ai-providers).
 4. It opens the release pull request with the GitHub App token, so CI runs on
    it.
 
@@ -374,9 +377,10 @@ and edit the CHANGELOG entry before merging.
 | `app-id` | required | ID of the GitHub App (`vars.WORKFLOWS_BOT_APP_ID`). |
 | `base` | `''` | Branch to cut the release from. Empty means `develop` if it exists, otherwise `main`. |
 | `node-version` | `24` | Node.js version for the release tools. |
-| `model` | `gpt-5-mini` | OpenAI model for the release notes. |
 
-Secrets: `app-key` (required) and `openai-api-key` (optional).
+Secrets: `app-key` (required), and the optional AI provider keys
+`openrouter-api-key` and `openai-api-key`. Pass whichever the organization
+has; the callers the installer writes pass both.
 
 ### back-merge.yml
 
