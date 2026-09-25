@@ -37,7 +37,11 @@ export function renderHeading({ version, previousTag, repoUrl, date = today() })
 // `commits` are parsed commits (see commits.mjs), newest first. Commits
 // without a conventional type are left out.
 export function renderNotes({ version, previousTag, commits, repoUrl, date = today() }) {
-  const lines = [renderHeading({ version, previousTag, repoUrl, date }), ''];
+  return `${renderHeading({ version, previousTag, repoUrl, date })}\n\n${renderNotesBody({ commits, repoUrl })}`;
+}
+
+export function renderNotesBody({ commits, repoUrl }) {
+  const lines = [];
   const breaking = commits.filter((commit) => commit.breaking);
 
   if (breaking.length > 0) {

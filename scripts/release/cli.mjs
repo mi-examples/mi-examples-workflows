@@ -5,6 +5,8 @@
 //   next-version        Next production version from commits since the last vX.Y.Z tag.
 //   next-beta           Next X.Y.Z-beta.N for the same commits.
 //   notes               Conventional-commit notes for a version.
+//   release-notes       CHANGELOG section for a production release: AI notes, with
+//                       GitHub-generated and conventional-commit notes as fallbacks.
 //   changelog-insert    Insert (or replace) a version section at the top of CHANGELOG.md.
 //   changelog-extract   Print one version's section, e.g. for a GitHub release body.
 //
@@ -17,10 +19,12 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
+import { DEFAULT_MODEL } from './ai-notes.mjs';
 import { extractSection, insertSection } from './changelog.mjs';
 import { parseCommit } from './commits.mjs';
 import { readCommits } from './git.mjs';
 import { renderNotes, today } from './notes.mjs';
+import { buildReleaseNotes, SOURCES } from './release-notes.mjs';
 import { lastRelease, nextBeta, nextVersion } from './versions.mjs';
 
 const USAGE = `Usage: node scripts/release/cli.mjs <command> [options]
@@ -33,9 +37,23 @@ Commands:
   notes --version <v> [--from <tag>] [--to HEAD] [--repo-url <url>] [--date YYYY-MM-DD] [--output <file>]
       --from defaults to the last production tag reachable from --to.
       --repo-url defaults to $GITHUB_SERVER_URL/$GITHUB_REPOSITORY.
+  release-notes --version <v> [--from <tag>] [--to HEAD] [--repo-url <url>] [--date YYYY-MM-DD] [--output <file>]
+                [--model ${DEFAULT_MODEL}] [--sources ${SOURCES.join(',')}] [--no-diff]
+      Tries each source in order: ai needs $OPENAI_API_KEY, github needs $GITHUB_TOKEN and $GITHUB_REPOSITORY.
+      Outputs: source, warnings
   changelog-insert --version <v> --notes-file <file> [--file CHANGELOG.md]
   changelog-extract --version <v> [--file CHANGELOG.md] [--with-heading] [--output <file>]
 `;
+
+// Escaped per the workflow-command format, so a message can't start a new command.
+function escapeCommand(message) {
+  return message.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+}
+
+function warn(message) {
+  if (process.env.GITHUB_ACTIONS === 'true') process.stderr.write(`::warning::${escapeCommand(message)}\n`);
+  else process.stderr.write(`warning: ${message}\n`);
+}
 
 function writeOutputs(outputs) {
   const file = process.env.GITHUB_OUTPUT;
@@ -138,6 +156,49 @@ const COMMANDS = {
     },
   },
 
+  'release-notes': {
+    options: {
+      version: { type: 'string' },
+      from: { type: 'string' },
+      to: { type: 'string', default: 'HEAD' },
+      'repo-url': { type: 'string' },
+      date: { type: 'string' },
+      output: { type: 'string' },
+      model: { type: 'string', default: DEFAULT_MODEL },
+      sources: { type: 'string', default: SOURCES.join(',') },
+      'no-diff': { type: 'boolean', default: false },
+    },
+    async run(values) {
+      const version = required(values, 'version').replace(/^v/, '');
+      const from = values.from ?? lastRelease({ ref: values.to })?.tag;
+
+      if (!from) throw new Error(`--from is required: no production tag is reachable from ${values.to}`);
+
+      const sources = values.sources.split(',').map((source) => source.trim()).filter(Boolean);
+      const unknown = sources.filter((source) => !SOURCES.includes(source));
+
+      if (sources.length === 0 || unknown.length > 0) {
+        throw new Error(`--sources must be a comma-separated subset of ${SOURCES.join(',')}`);
+      }
+
+      const result = await buildReleaseNotes({
+        version,
+        from,
+        to: values.to,
+        repoUrl: values['repo-url'] ?? defaultRepoUrl(),
+        date: values.date ?? today(),
+        sources,
+        model: values.model,
+        includeDiff: !values['no-diff'],
+      });
+
+      for (const warning of result.warnings) warn(warning);
+
+      writeOutputs({ source: result.source, warnings: result.warnings.join('\n') });
+      emit(result.section, values.output);
+    },
+  },
+
   'changelog-insert': {
     options: {
       version: { type: 'string' },
@@ -174,7 +235,7 @@ const COMMANDS = {
   },
 };
 
-export function main(argv = process.argv.slice(2)) {
+export async function main(argv = process.argv.slice(2)) {
   const [name, ...rest] = argv;
 
   if (!name || name === '--help' || name === '-h') {
@@ -194,23 +255,17 @@ export function main(argv = process.argv.slice(2)) {
   try {
     const { values } = parseArgs({ args: rest, options: command.options, strict: true, allowPositionals: false });
 
-    command.run(values);
+    await command.run(values);
 
     return 0;
   } catch (error) {
-    if (process.env.GITHUB_ACTIONS === 'true') {
-      // Escaped per the workflow-command format, so a message can't start a new command.
-      const message = error.message.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
-
-      process.stderr.write(`::error::${message}\n`);
-    } else {
-      process.stderr.write(`error: ${error.message}\n`);
-    }
+    if (process.env.GITHUB_ACTIONS === 'true') process.stderr.write(`::error::${escapeCommand(error.message)}\n`);
+    else process.stderr.write(`error: ${error.message}\n`);
 
     return 1;
   }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  process.exitCode = main();
+  process.exitCode = await main();
 }

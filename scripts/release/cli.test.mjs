@@ -98,6 +98,26 @@ describe('cli', () => {
     assert.doesNotMatch(actions.stderr, /\n::warning::/);
   });
 
+  it('release-notes falls back to conventional notes and reports why', () => {
+    repo.commit('chore: init');
+    repo.tag('v1.2.0');
+    repo.commit('fix: handle spaces');
+
+    const env = { OPENAI_API_KEY: '', GITHUB_TOKEN: '', GITHUB_REPOSITORY: '', GITHUB_SERVER_URL: '' };
+    const { status, stdout, outputs } = run(['release-notes', '--version', '1.2.1', '--date', '2026-09-25'], env);
+
+    assert.equal(status, 0);
+    assert.match(stdout, /^## 1\.2\.1 \(2026-09-25\)\n\n### Bug Fixes\n\n\* handle spaces \([0-9a-f]{7}\)\n$/);
+    assert.match(outputs, /^source=conventional\nwarnings<<(EOF_[0-9a-f-]+)\nOPENAI_API_KEY is not set.*\nGITHUB_TOKEN or GITHUB_REPOSITORY is not set.*\n\1\n$/);
+  });
+
+  it('release-notes validates --sources', () => {
+    repo.commit('chore: init');
+    repo.tag('v1.2.0');
+
+    assert.equal(run(['release-notes', '--version', '1.2.1', '--sources', 'ai,magic']).status, 1);
+  });
+
   it('rejects unknown commands and options', () => {
     assert.equal(run(['publish']).status, 2);
     assert.equal(run(['next-version', '--nope']).status, 1);
