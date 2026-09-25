@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { createRepo } from './fixtures.mjs';
-import { lastRelease, nextBeta, nextVersion } from './versions.mjs';
+import { lastRelease, nextBeta, nextVersion, releaseStatus } from './versions.mjs';
 
 let repo;
 
@@ -89,6 +91,56 @@ describe('nextVersion', () => {
     repo.git('merge', '-q', '--no-ff', 'main', '-m', 'Merge main into develop');
 
     assert.equal(nextVersion({ cwd: repo.dir }).version, '1.5.0');
+  });
+});
+
+describe('releaseStatus', () => {
+  const setVersion = (version) => {
+    writeFileSync(join(repo.dir, 'package.json'), JSON.stringify({ name: 'pkg', version }));
+    repo.git('add', 'package.json');
+    repo.commit(`chore(release): ${version}`);
+  };
+
+  it('reports a new version, then released once tagged', () => {
+    setVersion('1.2.0');
+    repo.tag('v1.2.0');
+    setVersion('1.3.0');
+
+    assert.deepEqual(releaseStatus({ cwd: repo.dir }), {
+      version: '1.3.0',
+      tag: 'v1.3.0',
+      tagExists: false,
+      lastTag: 'v1.2.0',
+      state: 'new',
+    });
+
+    repo.tag('v1.3.0');
+
+    assert.equal(releaseStatus({ cwd: repo.dir }).state, 'released');
+  });
+
+  it('treats the first release without any tag as new', () => {
+    setVersion('0.1.0');
+
+    assert.equal(releaseStatus({ cwd: repo.dir }).state, 'new');
+  });
+
+  it('reports prereleases and stale versions', () => {
+    setVersion('1.2.0');
+    repo.tag('v1.2.0');
+    setVersion('1.3.0-beta.1');
+
+    assert.equal(releaseStatus({ cwd: repo.dir }).state, 'prerelease');
+
+    setVersion('1.1.9');
+
+    assert.equal(releaseStatus({ cwd: repo.dir }).state, 'stale');
+  });
+
+  it('rejects an invalid version', () => {
+    setVersion('latest');
+
+    assert.throws(() => releaseStatus({ cwd: repo.dir }), /invalid version: latest/);
   });
 });
 

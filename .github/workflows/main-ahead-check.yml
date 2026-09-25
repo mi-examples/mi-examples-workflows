@@ -1,0 +1,72 @@
+name: Main ahead check
+
+# Pull-request check for PRs into develop. It fails (or warns) when main has
+# commits that develop doesn't: usually a release whose back-merge hasn't
+# been merged yet. Building on that stale develop would compute the next
+# beta from an old version.
+#
+# The back-merge pull request itself (head: main) is always allowed.
+#
+# The caller job needs `permissions: contents: read`.
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: '`fail` to block the pull request, `warn` to only annotate it.'
+        type: string
+        default: fail
+      main-branch:
+        description: The production branch.
+        type: string
+        default: main
+
+permissions: {}
+
+jobs:
+  check:
+    name: Main ahead check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compare branches
+        env:
+          MODE: ${{ inputs.mode }}
+          MAIN: ${{ inputs.main-branch }}
+          BASE: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          branch_re='^[A-Za-z0-9._/-]+$'
+          [[ "$MODE" == "fail" || "$MODE" == "warn" ]] || { echo "::error::mode must be fail or warn"; exit 1; }
+          [[ "$MAIN" =~ $branch_re ]] || { echo "::error::Invalid main-branch"; exit 1; }
+
+          if [[ -z "$BASE" ]]; then
+            echo "Not a pull request; nothing to check."
+            exit 0
+          fi
+          if [[ "$HEAD_REF" == "$MAIN" ]]; then
+            echo "This is the back-merge of $MAIN; allowed."
+            exit 0
+          fi
+
+          missing="$(git rev-list --count "origin/$BASE..origin/$MAIN")"
+          if [[ "$missing" == "0" ]]; then
+            echo "$BASE contains everything in $MAIN."
+            exit 0
+          fi
+
+          echo "$MAIN has $missing commit(s) that $BASE doesn't:"
+          git log --oneline --no-decorate -n 10 "origin/$BASE..origin/$MAIN"
+          message="$MAIN is ahead of $BASE by $missing commit(s). Merge the open back-merge pull request ($MAIN → $BASE) first, or merge origin/$MAIN into this branch."
+          if [[ "$MODE" == "fail" ]]; then
+            echo "::error::$message"
+            exit 1
+          fi
+          echo "::warning::$message"

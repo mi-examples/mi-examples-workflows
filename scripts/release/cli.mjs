@@ -4,6 +4,7 @@
 //
 //   next-version        Next production version from commits since the last vX.Y.Z tag.
 //   next-beta           Next X.Y.Z-beta.N for the same commits.
+//   release-status      Whether the package.json version on main still needs releasing.
 //   notes               Conventional-commit notes for a version.
 //   release-notes       CHANGELOG section for a production release: AI notes, with
 //                       GitHub-generated and conventional-commit notes as fallbacks.
@@ -25,7 +26,7 @@ import { parseCommit } from './commits.mjs';
 import { readCommits } from './git.mjs';
 import { renderNotes, today } from './notes.mjs';
 import { buildReleaseNotes, SOURCES } from './release-notes.mjs';
-import { lastRelease, nextBeta, nextVersion } from './versions.mjs';
+import { lastRelease, nextBeta, nextVersion, releaseStatus } from './versions.mjs';
 
 const USAGE = `Usage: node scripts/release/cli.mjs <command> [options]
 
@@ -34,6 +35,9 @@ Commands:
       Outputs: release, version, level, last-tag
   next-beta [--ref HEAD]
       Outputs: release, version, base-version, level, last-tag, previous-tag, already-tagged
+  release-status [--ref HEAD]
+      State of the package.json version: new, released, prerelease (exit 0) or stale (exit 1).
+      Outputs: state, version, tag, tag-exists, last-tag
   notes --version <v> [--from <tag>] [--to HEAD] [--repo-url <url>] [--date YYYY-MM-DD] [--output <file>]
       --from defaults to the last production tag reachable from --to.
       --repo-url defaults to $GITHUB_SERVER_URL/$GITHUB_REPOSITORY.
@@ -125,6 +129,30 @@ const COMMANDS = {
 
       if (result.version) console.log(result.version);
       else console.error(`No release: no releasable commits since ${result.lastTag}.`);
+    },
+  },
+
+  'release-status': {
+    options: { ref: { type: 'string', default: 'HEAD' } },
+    run(values) {
+      const result = releaseStatus({ ref: values.ref });
+
+      writeOutputs({
+        state: result.state,
+        version: result.version,
+        tag: result.tag,
+        'tag-exists': result.tagExists,
+        'last-tag': result.lastTag,
+      });
+
+      if (result.state === 'stale') {
+        throw new Error(
+          `package.json on ${values.ref} says ${result.version}, which is not newer than ${result.lastTag} and has no tag. ` +
+            'Bump the version through a release pull request.',
+        );
+      }
+
+      console.log(result.state);
     },
   },
 

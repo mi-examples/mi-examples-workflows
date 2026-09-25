@@ -1,0 +1,192 @@
+name: Release
+
+# Publishes a production release on push to main, when package.json carries a
+# version that has not been released yet. That version arrives through the
+# release pull request opened by prepare-release.yml.
+#
+# It builds and tests once, publishes to npm under the `latest` dist-tag, then
+# creates the vX.Y.Z tag and a GitHub release whose body is the version's
+# CHANGELOG.md section (the notes reviewed in the release pull request).
+#
+# Every other push to main (a back-merge, a dependency update, ...) finds the
+# version already released and does nothing. Re-running is safe: a version
+# that is already on npm is not published again, and an existing GitHub
+# release is left alone.
+#
+# The caller job needs `permissions: contents: write` and `id-token: write`,
+# and the caller file must be the one registered as the npm trusted publisher
+# (release.yml).
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version used to build and publish.
+        type: string
+        default: '24'
+      build-script:
+        description: Name of the build script, run with `npm run --if-present`.
+        type: string
+        default: build
+      test:
+        description: Run `npm test` before publishing, if the script exists.
+        type: boolean
+        default: true
+      environment:
+        description: GitHub environment of the publish job. The npm trusted publisher should name it.
+        type: string
+        default: npm-publish
+      access:
+        description: npm access level for the publish.
+        type: string
+        default: public
+    outputs:
+      released:
+        description: '"true" when this run created a new production release.'
+        value: ${{ jobs.github-release.outputs.released }}
+      version:
+        description: The version in package.json.
+        value: ${{ jobs.plan.outputs.version }}
+
+permissions: {}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      state: ${{ steps.status.outputs.state }}
+      version: ${{ steps.status.outputs.version }}
+      published: ${{ steps.npm.outputs.published }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: $/.github/actions/release-tools
+        id: tools
+
+      - name: Release status
+        id: status
+        env:
+          RELEASE_CLI: ${{ steps.tools.outputs.cli }}
+        run: node "$RELEASE_CLI" release-status
+
+      - name: Already on npm?
+        id: npm
+        if: steps.status.outputs.state == 'new' || steps.status.outputs.state == 'released'
+        env:
+          VERSION: ${{ steps.status.outputs.version }}
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    name: Publish to npm
+    needs: plan
+    # `released` without the npm version means the tag exists but the publish
+    # never finished, so it is retried.
+    if: (needs.plan.outputs.state == 'new' || needs.plan.outputs.state == 'released') && needs.plan.outputs.published == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: npm-publish-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # OIDC token for npm Trusted Publishing, only in this job
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        env:
+          BUILD_SCRIPT: ${{ inputs.build-script }}
+        run: npm run --if-present "$BUILD_SCRIPT"
+
+      - name: Test
+        if: inputs.test
+        run: npm run --if-present test
+
+      - name: Publish
+        env:
+          ACCESS: ${{ inputs.access }}
+        run: npm publish --tag latest --access "$ACCESS"
+
+      - name: Wait for the registry
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          for attempt in $(seq 1 24); do
+            if npm view "$name@$VERSION" version >/dev/null 2>&1; then
+              echo "$name@$VERSION is available."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::warning::$name@$VERSION was published but is not visible on the registry yet."
+
+  github-release:
+    name: GitHub release
+    needs: [plan, publish]
+    if: >-
+      always() && needs.plan.outputs.state == 'new' &&
+      (needs.publish.result == 'success' || (needs.publish.result == 'skipped' && needs.plan.outputs.published == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # creates the vX.Y.Z tag and the GitHub release
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: $/.github/actions/release-tools
+        id: tools
+
+      - name: Create the tag and release
+        id: release
+        env:
+          RELEASE_CLI: ${{ steps.tools.outputs.cli }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          notes="$RUNNER_TEMP/notes.md"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists."
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! node "$RELEASE_CLI" changelog-extract --version "$VERSION" --output "$notes"; then
+            echo "::warning::CHANGELOG.md has no section for $VERSION; using conventional-commit notes instead."
+            if node "$RELEASE_CLI" notes --version "$VERSION" --output "$RUNNER_TEMP/section.md"; then
+              tail -n +3 "$RUNNER_TEMP/section.md" > "$notes"
+            else
+              echo "Release $tag." > "$notes"
+            fi
+          fi
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --latest --notes-file "$notes"
+          echo "released=true" >> "$GITHUB_OUTPUT"
