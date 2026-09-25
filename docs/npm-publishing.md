@@ -176,8 +176,7 @@ this for a good reason.
 Once a release from CI has worked:
 
 - **Disallow tokens on npmjs.com.** Go to the package's **Settings →
-  Publishing access** and choose **Require two-factor authentication and
-  disallow tokens**. Trusted publishing keeps working.
+  Publishing access** and choose **Require two-factor authentication and disallow bypass 2fa tokens**. Trusted publishing keeps working.
 - **Delete token secrets.** Delete any `NPM_TOKEN` (or similar) secret from
   the repository.
 
