@@ -8,6 +8,12 @@
 // is skipped or has failed do the notes come from GitHub.
 //
 // Both providers speak the OpenAI Chat Completions API.
+//
+// The models were chosen by comparing eight models on real releases of the
+// package repositories (2026-09-25). Claude Opus 5.5 wrote the most accurate,
+// user-focused notes and Sonnet 5 came close; gpt-5-mini, the earlier
+// default, described implementation details and labelled internal CI changes
+// as breaking.
 
 export const AI_PROVIDERS = [
   {
@@ -15,7 +21,10 @@ export const AI_PROVIDERS = [
     label: 'OpenRouter',
     keyEnv: 'OPENROUTER_API_KEY',
     url: 'https://openrouter.ai/api/v1/chat/completions',
-    model: 'openai/gpt-5-mini',
+    model: 'anthropic/claude-opus-5.5',
+    // Sent as OpenRouter's `models` list: when the first model is down, rate
+    // limited or rejects the request, OpenRouter answers with the next one.
+    fallbackModels: ['anthropic/claude-sonnet-5'],
     // Route only to endpoints whose providers don't store or train on the
     // prompts. OpenRouter itself doesn't log them unless the account opts in.
     body: { provider: { data_collection: 'deny' } },
@@ -25,7 +34,7 @@ export const AI_PROVIDERS = [
     label: 'OpenAI',
     keyEnv: 'OPENAI_API_KEY',
     url: 'https://api.openai.com/v1/chat/completions',
-    model: 'gpt-5-mini',
+    model: 'gpt-6-luna',
   },
 ];
 

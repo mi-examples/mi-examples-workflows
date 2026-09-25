@@ -39,7 +39,7 @@ describe('buildReleaseNotes', () => {
     });
 
     assert.equal(result.source, 'ai');
-    assert.equal(result.detail, 'OpenAI, gpt-5-mini');
+    assert.equal(result.detail, 'OpenAI, gpt-6-luna');
     assert.deepEqual(result.warnings, []);
     assert.equal(result.section, `${HEADING}\n\n### Features\n\n- Added a \`--dry-run\` flag\n`);
     assert.match(seen[0], /- feat: add --dry-run/);
@@ -56,7 +56,7 @@ describe('buildReleaseNotes', () => {
       },
     });
 
-    assert.equal(result.detail, 'OpenRouter, openai/gpt-5-mini');
+    assert.equal(result.detail, 'OpenRouter, anthropic/claude-opus-5.5');
     assert.ok(urls.every((url) => url.startsWith('https://openrouter.ai/')));
   });
 
@@ -68,7 +68,7 @@ describe('buildReleaseNotes', () => {
     });
 
     assert.equal(result.source, 'ai');
-    assert.equal(result.detail, 'OpenAI, gpt-5-mini');
+    assert.equal(result.detail, 'OpenAI, gpt-6-luna');
     assert.deepEqual(result.warnings, ['OpenRouter release notes failed: OpenRouter request failed: 402 insufficient credits']);
   });
 

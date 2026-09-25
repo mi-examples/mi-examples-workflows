@@ -102,11 +102,22 @@ export function buildUserPrompt({ repo, version, commits, diff, boundary = rando
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The model fields of a request: an explicit `model` alone, or the
+// provider's model plus its fallbacks as OpenRouter's `models` list.
+function modelFields(provider, model) {
+  if (model) return { model };
+  if (provider.fallbackModels?.length) return { models: [provider.model, ...provider.fallbackModels] };
+
+  return { model: provider.model };
+}
+
 // One retry on network errors, 429, 5xx and empty content; anything else
 // (bad key, bad request) fails immediately. `provider` is an entry of
-// AI_PROVIDERS; `model` defaults to the provider's model.
-export async function callChatCompletions({ provider, apiKey, model = provider.model, system, user, fetchImpl = fetch, retryDelayMs = RETRY_DELAY_MS }) {
+// AI_PROVIDERS; `model` overrides the provider's models. Resolves to the
+// content and the model that actually answered.
+export async function callChatCompletions({ provider, apiKey, model, system, user, fetchImpl = fetch, retryDelayMs = RETRY_DELAY_MS }) {
   const { label, url, body: extraBody = {} } = provider;
+  const models = modelFields(provider, model);
   let lastError;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -119,7 +130,7 @@ export async function callChatCompletions({ provider, apiKey, model = provider.m
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
           ...extraBody,
-          model,
+          ...models,
           messages: [
             { role: 'system', content: system },
             { role: 'user', content: user },
@@ -154,8 +165,11 @@ export async function callChatCompletions({ provider, apiKey, model = provider.m
 
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content?.trim();
+    // The answering model ends up in the release pull request, so only a
+    // plain model ID is accepted from the response.
+    const answered = /^[\w.:/-]{1,100}$/.test(data?.model ?? '') ? data.model : (models.model ?? models.models[0]);
 
-    if (content) return content;
+    if (content) return { content, model: answered };
 
     lastError = new Error(`${label} response had no content (finish_reason: ${data?.choices?.[0]?.finish_reason ?? 'unknown'})`);
 
@@ -254,16 +268,19 @@ export function sanitizeNotes(text) {
 export async function generateAiNotes({ provider, apiKey, model, repo, version, commits, diff, fetchImpl, retryDelayMs }) {
   const call = (system, user) => callChatCompletions({ provider, apiKey, model, system, user, fetchImpl, retryDelayMs });
   const warnings = [];
-  const draft = await call(RULES, buildUserPrompt({ repo, version, commits, diff }));
+  const { content: draft, model: draftModel } = await call(RULES, buildUserPrompt({ repo, version, commits, diff }));
   let notes = draft;
+  let answeredBy = draftModel;
 
   try {
     const boundary = randomUUID();
-
-    notes = await call(
+    const review = await call(
       REVIEW_PROMPT,
       `Rules:\n${RULES}\n\n<untrusted-input id="${boundary}">\n${draft.replaceAll(boundary, '')}\n</untrusted-input id="${boundary}">`,
     );
+
+    notes = review.content;
+    answeredBy = review.model;
   } catch (error) {
     warnings.push(`AI review pass failed, using the unreviewed draft: ${error.message}`);
   }
@@ -272,5 +289,5 @@ export async function generateAiNotes({ provider, apiKey, model, repo, version, 
 
   if (!sanitized) throw new Error('the AI response contained no usable release notes');
 
-  return { notes: sanitized, warnings };
+  return { notes: sanitized, warnings, model: answeredBy };
 }

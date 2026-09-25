@@ -82,13 +82,22 @@ keys; they don't choose a provider or a model.
 
 | Order | Provider | Key | Model |
 | -- | -- | -- | -- |
-| 1 | OpenRouter | `OPENROUTER_API_KEY` | `openai/gpt-5-mini` |
-| 2 | OpenAI | `OPENAI_API_KEY` | `gpt-5-mini` |
+| 1 | OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-opus-5.5`, falling back to `anthropic/claude-sonnet-5` |
+| 2 | OpenAI | `OPENAI_API_KEY` | `gpt-6-luna` |
 
 - **Order.** A provider without a key is skipped. When a provider's call
   fails (bad key, no credits, outage), the next provider is tried and a
   warning is added. Only when every provider is skipped or has failed do the
   notes come from GitHub.
+- **Model fallback.** OpenRouter gets the models as its `models` list. When
+  the first model is down, rate limited or rejects the request, OpenRouter
+  answers with the next one. The release pull request names the model that
+  actually answered.
+- **Why these models.** Eight models were compared on real releases of the
+  package repositories. Claude Opus 5.5 wrote the most accurate notes, aimed
+  at users of the package, and Sonnet 5 came close. The earlier default,
+  `gpt-5-mini`, described implementation details and labelled internal CI
+  changes as breaking. A release costs a few cents with either Claude model.
 - **Same API.** Both providers use the OpenAI Chat Completions API, so the
   prompts, the limits and the protections below are the same for both.
 - **OpenRouter data policy.** Requests to OpenRouter set

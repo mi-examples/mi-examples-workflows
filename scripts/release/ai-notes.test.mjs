@@ -7,8 +7,8 @@ import { AI_PROVIDERS, findProvider } from './ai-providers.mjs';
 const OPENAI = findProvider('openai');
 const OPENROUTER = findProvider('openrouter');
 
-const reply = (content, status = 200) =>
-  new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }), { status });
+const reply = (content, { status = 200, model } = {}) =>
+  new Response(JSON.stringify({ ...(model ? { model } : {}), choices: [{ message: { content }, finish_reason: 'stop' }] }), { status });
 
 function fakeFetch(...responses) {
   const calls = [];
@@ -191,26 +191,52 @@ describe('callChatCompletions', () => {
   it('sends the model, messages and a completion token cap', async () => {
     const { impl, calls } = fakeFetch(reply('- ok'));
 
-    assert.equal(await callChatCompletions({ ...base, fetchImpl: impl }), '- ok');
+    assert.deepEqual(await callChatCompletions({ ...base, fetchImpl: impl }), { content: '- ok', model: 'm' });
     assert.equal(calls[0].url, OPENAI.url);
     assert.equal(calls[0].body.model, 'm');
     assert.deepEqual(calls[0].body.messages.map((message) => message.role), ['system', 'user']);
     assert.equal(calls[0].body.max_completion_tokens, 8000);
   });
 
-  it("uses the provider's endpoint, model and extra request fields", async () => {
+  it("uses the provider's model when there is no override", async () => {
     const { impl, calls } = fakeFetch(reply('- ok'));
 
-    await callChatCompletions({ ...base, provider: OPENROUTER, model: undefined, fetchImpl: impl });
+    await callChatCompletions({ ...base, model: undefined, fetchImpl: impl });
+    assert.equal(calls[0].body.model, 'gpt-6-luna');
+    assert.equal(calls[0].body.models, undefined);
+  });
+
+  it('sends OpenRouter the model with its fallbacks and the data policy, and reports the answering model', async () => {
+    const { impl, calls } = fakeFetch(reply('- ok', { model: 'anthropic/claude-sonnet-5' }));
+    const result = await callChatCompletions({ ...base, provider: OPENROUTER, model: undefined, fetchImpl: impl });
+
     assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/chat/completions');
-    assert.equal(calls[0].body.model, OPENROUTER.model);
+    assert.deepEqual(calls[0].body.models, ['anthropic/claude-opus-5.5', 'anthropic/claude-sonnet-5']);
+    assert.equal(calls[0].body.model, undefined);
     assert.deepEqual(calls[0].body.provider, { data_collection: 'deny' });
+    assert.deepEqual(result, { content: '- ok', model: 'anthropic/claude-sonnet-5' });
+  });
+
+  it('sends only the override model, without fallbacks', async () => {
+    const { impl, calls } = fakeFetch(reply('- ok'));
+
+    await callChatCompletions({ ...base, provider: OPENROUTER, model: 'x/y', fetchImpl: impl });
+    assert.equal(calls[0].body.model, 'x/y');
+    assert.equal(calls[0].body.models, undefined);
+  });
+
+  it("doesn't trust an odd model name in the response", async () => {
+    const result = await callChatCompletions({ ...base, fetchImpl: fakeFetch(reply('- ok', { model: '<b>@team</b>' })).impl });
+
+    assert.equal(result.model, 'm');
   });
 
   it('retries once on 5xx, network errors and empty content', async () => {
-    assert.equal(await callChatCompletions({ ...base, fetchImpl: fakeFetch(new Response('down', { status: 503 }), reply('- a')).impl }), '- a');
-    assert.equal(await callChatCompletions({ ...base, fetchImpl: fakeFetch(new Error('ECONNRESET'), reply('- b')).impl }), '- b');
-    assert.equal(await callChatCompletions({ ...base, fetchImpl: fakeFetch(reply(''), reply('- c')).impl }), '- c');
+    const content = async (fetchImpl) => (await callChatCompletions({ ...base, fetchImpl })).content;
+
+    assert.equal(await content(fakeFetch(new Response('down', { status: 503 }), reply('- a')).impl), '- a');
+    assert.equal(await content(fakeFetch(new Error('ECONNRESET'), reply('- b')).impl), '- b');
+    assert.equal(await content(fakeFetch(reply(''), reply('- c')).impl), '- c');
   });
 
   it('fails fast on a client error, naming the provider', async () => {
@@ -234,7 +260,7 @@ describe('generateAiNotes', () => {
     const { impl, calls } = fakeFetch(reply('### Features\n- Draft'), reply('Sure!\n### Features\n- Reviewed'));
     const result = await generateAiNotes({ ...input, fetchImpl: impl });
 
-    assert.deepEqual(result, { notes: '### Features\n\n- Reviewed', warnings: [] });
+    assert.deepEqual(result, { notes: '### Features\n\n- Reviewed', warnings: [], model: OPENAI.model });
     assert.equal(calls[0].body.model, OPENAI.model);
     assert.equal(calls[1].body.model, OPENAI.model);
     assert.match(calls[1].body.messages[1].content, /<untrusted-input id="[^"]+">\n### Features\n- Draft\n<\/untrusted-input/);

@@ -70,7 +70,7 @@ export async function buildReleaseNotes({
 
             warnings.push(...result.warnings.map((warning) => `${provider.label}: ${warning}`));
             body = result.notes;
-            detail = `${provider.label}, ${model ?? provider.model}`;
+            detail = `${provider.label}, ${result.model}`;
             break;
           } catch (error) {
             warnings.push(`${provider.label} release notes failed: ${error.message}`);
