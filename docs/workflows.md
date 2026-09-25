@@ -7,6 +7,71 @@ comment; Dependabot keeps both up to date.
 Every caller should set `permissions: {}` at workflow level and grant each job
 only what the called workflow needs, as listed below.
 
+## Installing and updating the callers
+
+Run the installer in the package repository:
+
+```sh
+npx github:mi-examples/mi-examples-workflows            # CI, secret scan, dependency audit
+npx github:mi-examples/mi-examples-workflows --release  # also the release flow
+npx github:mi-examples/mi-examples-workflows --dry-run  # show what would change
+```
+
+- **What it writes.** It writes the callers into `.github/workflows/`, pinned to the latest release of this repository by commit SHA. Use `--version vX.Y.Z` to pin a different release.
+- **`--release`.** It adds `release.yml`, plus `main-ahead-check.yml` when the repository has a `develop` branch.
+- **Re-running.** Running it again changes only what differs, and files are written with LF line endings.
+- **Old files.** It lists files from the old per-repository setup (`release-beta.yml`, `.releaserc*`, …) but doesn't delete them.
+
+The callers are **generated files**. The repository's own settings live in
+`.github/mi-examples-workflows.json`. `callers` lists the installed
+callers, and `inputs` holds the inputs of the shared workflows:
+
+```json
+{
+  "callers": ["ci", "secret-scan", "dependency-audit", "release", "main-ahead-check"],
+  "inputs": {
+    "ci": { "dist-dir": "dist", "extra-scripts": "test:e2e" },
+    "publish": { "build-script": "build:component" }
+  }
+}
+```
+
+The `inputs` groups are:
+
+| Group | Goes to |
+| -- | -- |
+| `ci` | `node-ci.yml` in `ci.yml` |
+| `secret-scan` | `secret-scan.yml` |
+| `dependency-audit` | `dependency-audit.yml` |
+| `publish` | `release-beta.yml` and `release.yml` (both jobs get the same build settings) |
+| `prepare` | `prepare-release.yml`, next to `app-id` |
+| `main-ahead-check` | `main-ahead-check.yml` |
+
+Values are strings, numbers or booleans. To change a setting, edit the JSON
+and re-run the installer. Don't edit the callers by hand: drift sync would
+undo it.
+
+### Drift sync
+
+`drift-sync.yml` in this repository keeps the installed callers current. It
+runs on every release tag, every Monday, and on demand. On demand, it takes
+`dry-run`, a list of `repos` and a `version`.
+
+1. It picks the repositories with the org custom property
+   `workflows-consumer=true`.
+2. It renders their callers from the release's templates and each
+   repository's `.github/mi-examples-workflows.json`.
+3. When a file differs, it opens or updates **one** pull request from
+   `mi-examples-workflows/sync` into `develop`, or into the default branch
+   when there is no `develop`.
+
+The commit is made by the GitHub App through the API, so it is signed.
+Repositories without the config file are skipped, so run the installer
+there first.
+
+To add a repository, run the installer there and set its
+`workflows-consumer` property to `true`.
+
 ## node-ci.yml
 
 Pull-request CI for an npm package. It runs:

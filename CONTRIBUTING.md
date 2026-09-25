@@ -46,6 +46,17 @@ npm test               # unit tests
 npm run check:pins     # SHA-pinning check
 ```
 
+## Caller templates
+
+`templates/*.yml` are the callers that package repositories get. The
+installer and drift sync render them through `scripts/callers/render.mjs`.
+CI lints the rendered output with actionlint and zizmor.
+
+A template change reaches every package repository as a drift-sync pull
+request after the next release tag. Keep templates backwards compatible with
+existing `.github/mi-examples-workflows.json` files, or document the
+migration.
+
 ## Validating changes
 
 Validate workflow changes on a pilot package repository before tagging a

@@ -1,0 +1,23 @@
+name: Main ahead check
+
+# Fails pull requests into develop while main has commits that develop lacks,
+# and re-runs them once the back-merge has landed.
+# https://github.com/mi-examples/mi-examples-workflows/blob/main/docs/workflows.md#main-ahead-checkyml
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+permissions: {}
+
+jobs:
+  main-ahead:
+    name: Main ahead check
+    permissions:
+      contents: read
+      pull-requests: read # lists open pull requests for the re-run
+      actions: write # re-runs failed checks once develop is up to date
+    uses: mi-examples/mi-examples-workflows/.github/workflows/main-ahead-check.yml@{{sha}} # {{version}}
+    {{with:main-ahead-check}}

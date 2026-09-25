@@ -1,0 +1,147 @@
+name: Drift sync
+
+# Keeps the shared-workflow callers in package repositories in line with the
+# latest release of this repository.
+#
+# It runs on every release tag, weekly, and on demand. For every repository
+# with the org custom property `workflows-consumer=true`, it renders the
+# callers from the release's templates and the repository's
+# .github/mi-examples-workflows.json. When something differs, it opens or
+# updates one pull request into develop (or the default branch). It never
+# pushes to those branches.
+#
+# Each repository gets its own job with a GitHub App token scoped to that
+# repository only.
+
+on:
+  push:
+    tags: ['v*']
+  schedule:
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Only report drift; don't open pull requests.
+        type: boolean
+        default: false
+      repos:
+        description: Comma-separated repository names. Empty means every consumer.
+        type: string
+        default: ''
+      version:
+        description: Release to sync to, e.g. v1.2.3. Empty means the latest.
+        type: string
+        default: ''
+
+permissions: {}
+
+concurrency:
+  group: drift-sync
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      sha: ${{ steps.release.outputs.sha }}
+      repos: ${{ steps.repos.outputs.repos }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Release to sync to
+        id: release
+        env:
+          REQUESTED: ${{ inputs.version || (github.ref_type == 'tag' && github.ref_name) || '' }}
+        run: node scripts/callers/cli.mjs resolve-release --version "$REQUESTED"
+
+      - name: Mint a GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.WORKFLOWS_BOT_APP_ID }}
+          private-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-organization-custom-properties: read
+
+      - name: Consumer repositories
+        id: repos
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ORG: ${{ github.repository_owner }}
+          ONLY: ${{ inputs.repos }}
+        run: |
+          consumers="$(gh api --paginate "orgs/$ORG/properties/values?repository_query=props.workflows-consumer:true" --jq '.[].repository_name' | sort -u)"
+          if [[ -n "$ONLY" ]]; then
+            wanted="$(tr ',' '\n' <<< "$ONLY" | tr -d ' ' | sed '/^$/d' | sort -u)"
+            unknown="$(comm -13 <(echo "$consumers") <(echo "$wanted"))"
+            [[ -z "$unknown" ]] || { echo "::error::Not a workflows consumer: $(echo $unknown)"; exit 1; }
+            consumers="$wanted"
+          fi
+          while IFS= read -r name; do
+            [[ -z "$name" || "$name" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "::error::Invalid repository name: $name"; exit 1; }
+          done <<< "$consumers"
+          repos="$(jq -Rsc 'split("\n") | map(select(length > 0))' <<< "$consumers")"
+          echo "Repositories: $repos"
+          echo "repos=$repos" >> "$GITHUB_OUTPUT"
+
+  sync:
+    name: Sync ${{ matrix.repo }}
+    needs: plan
+    if: needs.plan.outputs.repos != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        repo: ${{ fromJSON(needs.plan.outputs.repos) }}
+    steps:
+      # The templates and the sync script come from the release being synced
+      # to, not from the branch this workflow runs on.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Mint a GitHub App token for ${{ matrix.repo }}
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.WORKFLOWS_BOT_APP_ID }}
+          private-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ matrix.repo }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Sync
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository_owner }}/${{ matrix.repo }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          args=(sync --repo "$REPO" --sha "$SHA" --version "$VERSION")
+          [[ "$DRY_RUN" == "true" ]] && args+=(--dry-run)
+          node scripts/callers/cli.mjs "${args[@]}"

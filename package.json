@@ -15,5 +15,13 @@
   "scripts": {
     "test": "node --test",
     "check:pins": "node scripts/check-pinned-actions.mjs"
-  }
+  },
+  "bin": {
+    "mi-examples-workflows": "bin/install.mjs"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "templates"
+  ]
 }
