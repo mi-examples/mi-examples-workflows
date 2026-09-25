@@ -44,7 +44,9 @@ Content rules:
 - Describe what changed for someone using the package, in plain language. Name options, commands, APIs or configuration keys where that helps, and put package names, options, commands, file names and code in backticks.
 - Choose the section by the effect on users, not by the commit type: a commit typed "feat" that only upgrades a dependency is not a feature.
 - List every breaking change under "⚠ Breaking changes", including what users have to do. That covers commits marked [breaking], and also any change that can break existing users even if it isn't marked, such as a higher minimum Node.js version or a removed or renamed option.
-- Leave out changes with no effect on users: CI, tests, documentation-only changes, internal refactors, formatting, release housekeeping and dev-dependency updates. A runtime dependency update belongs under "Other changes" only when it matters to users, for example a security fix.
+- Only list a change as breaking when the diff or commits show users will be affected. Don't speculate: upgrading one of the package's own dependencies to a new major version is not breaking unless it changes what users must install, configure or call.
+- Leave out changes with no effect on users: CI, tests, documentation-only changes, internal refactors, build and compiler configuration, type-definition packages, formatting, release housekeeping and dev-dependency updates. A runtime dependency update belongs under "Other changes" only when it matters to users, for example a security fix.
+- Keep each bullet short and about the result for users, not the implementation: say what now works differently, not which internal function or setting was changed.
 - Combine commits that describe the same change into one bullet.
 - Do not include issue or ticket numbers, pull request numbers, commit hashes, links, URLs, e-mail addresses or @mentions.
 - Do not invent changes that the commits or diff don't show. When the diff and a commit message disagree, trust the commit message.`;
