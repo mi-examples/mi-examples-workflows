@@ -41,9 +41,10 @@ Output format (Markdown, and nothing else):
 - No title, no version number, no preamble, no summary paragraph, no closing remarks.
 
 Content rules:
-- Describe what changed for someone using the package, in plain language. Name options, commands, APIs or configuration keys where that helps.
-- List every breaking change (commits marked [breaking]) under "⚠ Breaking changes", including what users have to do.
-- Leave out changes with no effect on users: CI, tests, documentation-only changes, internal refactors, formatting, release housekeeping and dev-dependency updates. A runtime dependency update belongs under "Other changes" only when it matters to users, for example a security fix or a new minimum Node.js version.
+- Describe what changed for someone using the package, in plain language. Name options, commands, APIs or configuration keys where that helps, and put package names, options, commands, file names and code in backticks.
+- Choose the section by the effect on users, not by the commit type: a commit typed "feat" that only upgrades a dependency is not a feature.
+- List every breaking change under "⚠ Breaking changes", including what users have to do. That covers commits marked [breaking], and also any change that can break existing users even if it isn't marked, such as a higher minimum Node.js version or a removed or renamed option.
+- Leave out changes with no effect on users: CI, tests, documentation-only changes, internal refactors, formatting, release housekeeping and dev-dependency updates. A runtime dependency update belongs under "Other changes" only when it matters to users, for example a security fix.
 - Combine commits that describe the same change into one bullet.
 - Do not include issue or ticket numbers, pull request numbers, commit hashes, links, URLs, e-mail addresses or @mentions.
 - Do not invent changes that the commits or diff don't show. When the diff and a commit message disagree, trust the commit message.`;
