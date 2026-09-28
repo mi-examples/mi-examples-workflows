@@ -7,6 +7,10 @@ name: Main ahead check
 #   hasn't been merged yet; building on that develop would compute the next
 #   beta from an old version. The back-merge pull request itself (head: main)
 #   is always allowed.
+# - Only commits that aren't merges count. Merging develop into main without
+#   a release leaves just a merge commit on main, which changes nothing
+#   develop lacks. A release is still caught: its `chore(release)` commit
+#   from the release branch isn't a merge.
 # - On a push to develop, once develop contains main again (typically right
 #   after the back-merge), it re-runs the failed checks of open pull requests
 #   into develop, so nobody has to re-run them by hand.
@@ -60,14 +64,14 @@ jobs:
             exit 0
           fi
 
-          missing="$(git rev-list --count "origin/$BASE..origin/$MAIN")"
+          missing="$(git rev-list --count --no-merges "origin/$BASE..origin/$MAIN")"
           if [[ "$missing" == "0" ]]; then
-            echo "$BASE contains everything in $MAIN."
+            echo "$BASE contains every commit of $MAIN except merge commits."
             exit 0
           fi
 
           echo "$MAIN has $missing commit(s) that $BASE doesn't:"
-          git log --oneline --no-decorate -n 10 "origin/$BASE..origin/$MAIN"
+          git log --oneline --no-decorate --no-merges -n 10 "origin/$BASE..origin/$MAIN"
           message="$MAIN is ahead of $BASE by $missing commit(s). Merge the open back-merge pull request ($MAIN → $BASE) first, or merge origin/$MAIN into this branch. The check re-runs by itself once $BASE is updated."
           if [[ "$MODE" == "fail" ]]; then
             echo "::error::$message"
@@ -94,7 +98,8 @@ jobs:
         run: |
           [[ "$MAIN" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Invalid main-branch"; exit 1; }
 
-          ahead="$(gh api "repos/$REPO/compare/$BASE...$MAIN" --jq .ahead_by)"
+          # Same rule as the check: merge commits don't count.
+          ahead="$(gh api "repos/$REPO/compare/$BASE...$MAIN" --jq '[.commits[] | select(.parents | length == 1)] | length')"
           if [[ "$ahead" != "0" ]]; then
             echo "$MAIN is still ahead of $BASE by $ahead commit(s); nothing to re-run yet."
             exit 0

@@ -408,4 +408,6 @@ Secret: `app-key` (required).
 
 On pull requests into `develop` the check fails while `main` is ahead. The back-merge pull request itself (head `main`) always passes.
 
+Only commits that aren't merges count. Merging `develop` into `main` without a release leaves just a merge commit on `main`, so no back-merge is needed for it. A release is still caught, because its `chore(release)` commit from the release branch isn't a merge.
+
 On a push to `develop` it doesn't check anything. Once `develop` contains `main` again, typically right after the back-merge, it re-runs the failed checks of the open pull requests into `develop`. Nobody has to re-run them by hand.
