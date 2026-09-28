@@ -4,9 +4,10 @@ name: Prepare release
 #   1. computes the next production version from conventional commits since
 #      the last vX.Y.Z tag;
 #   2. bumps package.json and package-lock.json;
-#   3. writes the version's CHANGELOG.md section. The notes come from the AI
-#      if OPENAI_API_KEY is set, otherwise from GitHub, otherwise from the
-#      conventional commits;
+#   3. writes the version's CHANGELOG.md section. The notes come from an AI
+#      provider when its key is passed, otherwise from GitHub, otherwise from
+#      the conventional commits. The providers, their order and the models
+#      are set in scripts/release/ai-providers.mjs, for every repository;
 #   4. pushes release/vX.Y.Z and opens the pull request with the GitHub App
 #      token, so CI runs on it.
 #
@@ -15,7 +16,7 @@ name: Prepare release
 #
 # The release branch is cut from develop when the repository has one,
 # otherwise from main. The caller job needs `permissions: contents: read`,
-# and passes the App ID and key, plus the OpenAI key if there is one.
+# and passes the App ID and key, plus the AI provider keys it has.
 
 on:
   workflow_call:
@@ -32,16 +33,15 @@ on:
         description: Node.js version for the release tools and `npm version`.
         type: string
         default: '24'
-      model:
-        description: OpenAI model for the release notes.
-        type: string
-        default: gpt-5-mini
     secrets:
       app-key:
         description: Private key of the GitHub App.
         required: true
+      openrouter-api-key:
+        description: OpenRouter API key, for AI release notes.
+        required: false
       openai-api-key:
-        description: OpenAI API key. Without it, the notes come from GitHub or the conventional commits.
+        description: OpenAI API key, for AI release notes. Without any AI key, the notes come from GitHub or the conventional commits.
         required: false
 
 permissions: {}
@@ -130,11 +130,11 @@ jobs:
           RELEASE_CLI: ${{ steps.tools.outputs.cli }}
           VERSION: ${{ steps.next.outputs.version }}
           LAST_TAG: ${{ steps.next.outputs.last-tag }}
-          MODEL: ${{ inputs.model }}
+          OPENROUTER_API_KEY: ${{ secrets.openrouter-api-key }}
           OPENAI_API_KEY: ${{ secrets.openai-api-key }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          node "$RELEASE_CLI" release-notes --version "$VERSION" --from "$LAST_TAG" --model "$MODEL" --output "$RUNNER_TEMP/section.md"
+          node "$RELEASE_CLI" release-notes --version "$VERSION" --from "$LAST_TAG" --output "$RUNNER_TEMP/section.md"
           node "$RELEASE_CLI" changelog-insert --version "$VERSION" --notes-file "$RUNNER_TEMP/section.md"
 
       - name: Commit and push the release branch

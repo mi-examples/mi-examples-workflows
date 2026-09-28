@@ -20,7 +20,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { DEFAULT_MODEL } from './ai-notes.mjs';
+import { AI_PROVIDERS, findProvider } from './ai-providers.mjs';
 import { extractSection, insertSection } from './changelog.mjs';
 import { parseCommit } from './commits.mjs';
 import { readCommits } from './git.mjs';
@@ -42,8 +42,10 @@ Commands:
       --from defaults to the last production tag reachable from --to.
       --repo-url defaults to $GITHUB_SERVER_URL/$GITHUB_REPOSITORY.
   release-notes --version <v> [--from <tag>] [--to HEAD] [--repo-url <url>] [--date YYYY-MM-DD] [--output <file>]
-                [--model ${DEFAULT_MODEL}] [--sources ${SOURCES.join(',')}] [--no-diff]
-      Tries each source in order: ai needs $OPENAI_API_KEY, github needs $GITHUB_TOKEN and $GITHUB_REPOSITORY.
+                [--sources ${SOURCES.join(',')}] [--no-diff] [--provider <name> [--model <id>]]
+      Tries each source in order. github needs $GITHUB_TOKEN and $GITHUB_REPOSITORY; ai tries the providers
+      set in ai-providers.mjs in order (${AI_PROVIDERS.map((provider) => `${provider.name}: $${provider.keyEnv}`).join(', ')}).
+      --provider and --model override that, for local experiments.
       Outputs: source, warnings
   changelog-insert --version <v> --notes-file <file> [--file CHANGELOG.md]
   changelog-extract --version <v> [--file CHANGELOG.md] [--with-heading] [--output <file>]
@@ -192,7 +194,8 @@ const COMMANDS = {
       'repo-url': { type: 'string' },
       date: { type: 'string' },
       output: { type: 'string' },
-      model: { type: 'string', default: DEFAULT_MODEL },
+      provider: { type: 'string' },
+      model: { type: 'string' },
       sources: { type: 'string', default: SOURCES.join(',') },
       'no-diff': { type: 'boolean', default: false },
     },
@@ -209,6 +212,8 @@ const COMMANDS = {
         throw new Error(`--sources must be a comma-separated subset of ${SOURCES.join(',')}`);
       }
 
+      if (values.model && !values.provider) throw new Error('--model needs --provider');
+
       const result = await buildReleaseNotes({
         version,
         from,
@@ -216,13 +221,14 @@ const COMMANDS = {
         repoUrl: values['repo-url'] ?? defaultRepoUrl(),
         date: values.date ?? today(),
         sources,
+        providers: values.provider ? [findProvider(values.provider)] : AI_PROVIDERS,
         model: values.model,
         includeDiff: !values['no-diff'],
       });
 
       for (const warning of result.warnings) warn(warning);
 
-      writeOutputs({ source: result.source, warnings: result.warnings.join('\n') });
+      writeOutputs({ source: result.detail ? `${result.source} (${result.detail})` : result.source, warnings: result.warnings.join('\n') });
       emit(result.section, values.output);
     },
   },

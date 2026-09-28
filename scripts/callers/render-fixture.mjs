@@ -22,7 +22,7 @@ const INPUTS = {
   'secret-scan': { 'full-history': false },
   'dependency-audit': { 'audit-command': 'npm run audit:all' },
   publish: { 'build-script': 'build:component', test: false },
-  prepare: { model: 'gpt-5-mini' },
+  prepare: { base: 'develop' },
   'main-ahead-check': { mode: 'warn' },
 };
 
