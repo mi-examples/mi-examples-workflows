@@ -7,8 +7,8 @@ A CI or release fix is made once here and reaches every package through
 reusable workflows (`on: workflow_call`) and an `npx` installer that keeps the
 caller files in each package repository up to date.
 
-> **Status:** under construction. Until `v1.0.0`, only pilot package
-> repositories use these workflows, and inputs may still change.
+> **Status:** under construction. Until `v1.0.0`, inputs may still change,
+> and package repositories are being migrated one by one.
 
 ## Workflows
 
@@ -46,6 +46,11 @@ This installs the callers (CI, secret scan, dependency audit and, with
 repository's own settings go into `.github/mi-examples-workflows.json`. Drift
 sync then opens a pull request whenever a new release changes the callers.
 See [Installing and updating the callers](docs/workflows.md#installing-and-updating-the-callers).
+
+Moving a repository from its own CI and release workflows (semantic-release,
+manual tags, npm tokens) is a one-time checklist: repository settings, the
+installer, removing the old setup, required checks and the trusted publisher.
+See [docs/migration.md](docs/migration.md).
 
 ## Security defaults
 
