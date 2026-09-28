@@ -14,7 +14,7 @@ settings. Check that the repository can see them:
 
 ```sh
 gh api "repos/$repo/actions/organization-variables" --jq '.variables[].name'  # WORKFLOWS_BOT_APP_ID
-gh api "repos/$repo/actions/organization-secrets" --jq '.secrets[].name'      # WORKFLOWS_BOT_APP_KEY, OPENAI_API_KEY
+gh api "repos/$repo/actions/organization-secrets" --jq '.secrets[].name'      # WORKFLOWS_BOT_APP_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY
 ```
 
 The GitHub App must also be installed on the repository. Without the App the
@@ -22,8 +22,22 @@ release pull request, the back-merge and drift sync can't open pull requests.
 `GITHUB_TOKEN` can't create pull requests in this organization, and pull
 requests it creates get no CI.
 
-`OPENAI_API_KEY` is optional. Without it, the release notes fall back to
-GitHub's generated notes.
+The AI provider keys `OPENROUTER_API_KEY` and `OPENAI_API_KEY` are optional.
+The release notes use the first provider whose key is set (see
+[AI providers](release-tools.md#ai-providers)). Without either key, they fall
+back to GitHub's generated notes.
+
+The org secrets and the variable are scoped to selected repositories. Add a
+new repository to each of them. This keeps the secret values and the other
+repositories as they are:
+
+```sh
+id="$(gh api "repos/$repo" --jq .id)"
+for secret in WORKFLOWS_BOT_APP_KEY OPENROUTER_API_KEY OPENAI_API_KEY; do
+  gh api -X PUT "orgs/mi-examples/actions/secrets/$secret/repositories/$id"
+done
+gh api -X PUT "orgs/mi-examples/actions/variables/WORKFLOWS_BOT_APP_ID/repositories/$id"
+```
 
 ## 2. Configure the repository
 
