@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-import { CALLERS, inputGroups, renderAll, renderCaller, renderConfig, validateConfig } from './render.mjs';
+import { CALLERS, inputGroups, renderAll, renderCaller, renderConfig, secretGroups, validateConfig } from './render.mjs';
 import { loadTemplatesFromDir } from './source.mjs';
 
 const TEMPLATES = loadTemplatesFromDir(join(dirname(fileURLToPath(import.meta.url)), '../../templates'));
@@ -37,6 +37,30 @@ describe('renderCaller', () => {
     assert.match(rendered, /      app-id: \$\{\{ vars\.WORKFLOWS_BOT_APP_ID \}\}\n      base: "develop"\n    secrets:/);
   });
 
+  it('renders a secrets: block after the with: block', () => {
+    const rendered = renderCaller(TEMPLATES.ci, {
+      ...PIN,
+      inputs: { ci: { submodules: true } },
+      secrets: { ci: { 'ssh-private-key': 'DEPLOY_KEY' } },
+    });
+
+    assert.match(
+      rendered,
+      /    uses: .*\n    with:\n      submodules: true\n    secrets:\n      ssh-private-key: \$\{\{ secrets\.DEPLOY_KEY \}\}\n$/,
+    );
+  });
+
+  it('passes publish secrets to both the beta and the release job', () => {
+    const rendered = renderCaller(TEMPLATES.release, { ...PIN, secrets: { publish: { 'ssh-private-key': 'DEPLOY_KEY' } } });
+
+    assert.equal(rendered.match(/    secrets:\n      ssh-private-key: \$\{\{ secrets\.DEPLOY_KEY \}\}\n/g).length, 2);
+  });
+
+  it('renders no secrets: block without secrets', () => {
+    assert.doesNotMatch(renderCaller(TEMPLATES.ci, PIN), /secrets/);
+    assert.doesNotMatch(renderCaller(TEMPLATES.release, PIN), /ssh-private-key|\{\{secrets:/);
+  });
+
   it('leaves GitHub expressions alone', () => {
     assert.match(renderCaller(TEMPLATES.ci, PIN), /group: ci-\$\{\{ github\.event\.pull_request\.number \}\}/);
   });
@@ -55,6 +79,21 @@ describe('validateConfig', () => {
   it('knows the input groups of each template', () => {
     assert.deepEqual(inputGroups(TEMPLATES.release), ['prepare', 'publish', 'publish']);
     assert.deepEqual(inputGroups(TEMPLATES.ci), ['ci']);
+    assert.deepEqual(secretGroups(TEMPLATES.release), ['publish', 'publish']);
+    assert.deepEqual(secretGroups(TEMPLATES.ci), ['ci']);
+    assert.deepEqual(secretGroups(TEMPLATES['secret-scan']), []);
+  });
+
+  it('rejects unused secret groups and names that are not repository secrets', () => {
+    const secrets = (value) => ({ callers: ['ci'], secrets: { ci: { 'ssh-private-key': value } } });
+
+    assert.throws(() => validateConfig({ callers: ['ci'], secrets: { publish: {} } }, TEMPLATES), /secrets group "publish" isn't used/);
+    assert.throws(() => validateConfig({ callers: ['ci'], secrets: { ci: { 'Bad Name': 'X' } } }, TEMPLATES), /invalid input name/);
+    assert.throws(() => validateConfig(secrets('deploy-key'), TEMPLATES), /must name a repository secret/);
+    assert.throws(() => validateConfig(secrets('GITHUB_TOKEN'), TEMPLATES), /must name a repository secret/);
+    assert.throws(() => validateConfig(secrets('X }} ${{ github.token'), TEMPLATES), /must name a repository secret/);
+    assert.throws(() => validateConfig(secrets(1), TEMPLATES), /must name a repository secret/);
+    assert.deepEqual(validateConfig(secrets('DEPLOY_KEY'), TEMPLATES).secrets, { ci: { 'ssh-private-key': 'DEPLOY_KEY' } });
   });
 
   it('rejects unknown callers, unused groups, bad names and bad values', () => {
@@ -78,6 +117,14 @@ describe('renderAll and renderConfig', () => {
     assert.equal(
       renderConfig({ callers: ['release', 'ci', 'secret-scan'], inputs: { ci: { 'dist-dir': 'dist' } } }),
       '{\n  "callers": [\n    "ci",\n    "secret-scan",\n    "release"\n  ],\n  "inputs": {\n    "ci": {\n      "dist-dir": "dist"\n    }\n  }\n}\n',
+    );
+  });
+
+  it('writes secrets only when set', () => {
+    assert.doesNotMatch(renderConfig({ callers: ['ci'], inputs: {}, secrets: {} }), /secrets/);
+    assert.equal(
+      renderConfig({ callers: ['ci'], inputs: {}, secrets: { ci: { 'ssh-private-key': 'DEPLOY_KEY' } } }),
+      '{\n  "callers": [\n    "ci"\n  ],\n  "inputs": {},\n  "secrets": {\n    "ci": {\n      "ssh-private-key": "DEPLOY_KEY"\n    }\n  }\n}\n',
     );
   });
 

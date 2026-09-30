@@ -132,6 +132,8 @@ jobs:
         test:extra
       env-vars: |
         FIXTURE_FLAG=on
+      # No submodules and no key here: exercises the step without secrets.
+      submodules: true
 
   self-test-secret-scan:
     name: Self-test secret-scan

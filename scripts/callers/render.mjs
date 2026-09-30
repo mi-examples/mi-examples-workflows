@@ -6,11 +6,14 @@
 //
 //   {
 //     "callers": ["ci", "secret-scan", "dependency-audit", "release", "main-ahead-check"],
-//     "inputs": { "ci": { "dist-dir": "dist" }, "publish": { "build-script": "build" } }
+//     "inputs": { "ci": { "dist-dir": "dist" }, "publish": { "build-script": "build" } },
+//     "secrets": { "ci": { "ssh-private-key": "DEPLOY_KEY" } }
 //   }
 //
 // `inputs` groups map to the `{{with:<group>}}` and `{{inputs:<group>}}`
 // placeholders in templates/*.yml. Values are strings, numbers or booleans.
+// `secrets` groups map to `{{secrets:<group>}}`. Each value names a secret of
+// the package repository, passed as `<key>: ${{ secrets.<NAME> }}`.
 
 export const CONFIG_PATH = '.github/mi-examples-workflows.json';
 
@@ -35,7 +38,8 @@ const HEADER = [
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 const SHA_RE = /^[0-9a-f]{40}$/;
 const VERSION_RE = /^v\d+\.\d+\.\d+$/;
-const BLOCK_RE = /^( *)\{\{(with|inputs):([a-z][a-z0-9-]*)\}\}\n/gm;
+const SECRET_NAME_RE = /^(?!GITHUB_)[A-Z_][A-Z0-9_]*$/;
+const BLOCK_RE = /^( *)\{\{(with|inputs|secrets):([a-z][a-z0-9-]*)\}\}\n/gm;
 
 export function callerPath(name) {
   return `.github/workflows/${CALLERS[name]}`;
@@ -43,7 +47,12 @@ export function callerPath(name) {
 
 // Input groups a template accepts, from its placeholders.
 export function inputGroups(template) {
-  return [...template.matchAll(BLOCK_RE)].map((match) => match[3]);
+  return [...template.matchAll(BLOCK_RE)].filter((match) => match[2] !== 'secrets').map((match) => match[3]);
+}
+
+// Secret groups a template accepts, from its `{{secrets:<group>}}` placeholders.
+export function secretGroups(template) {
+  return [...template.matchAll(BLOCK_RE)].filter((match) => match[2] === 'secrets').map((match) => match[3]);
 }
 
 function renderValue(value, where) {
@@ -64,6 +73,32 @@ function renderBlock(indent, kind, group, inputs) {
   return `${kind === 'with' ? `${indent}with:\n` : ''}${lines.join('\n')}\n`;
 }
 
+function renderSecretsBlock(indent, group, secrets) {
+  const entries = Object.entries(secrets[group] ?? {});
+
+  if (entries.length === 0) return '';
+
+  const lines = entries.map(([key, name]) => `${indent}  ${key}: \${{ secrets.${name} }}`);
+
+  return `${indent}secrets:\n${lines.join('\n')}\n`;
+}
+
+function validateGroups(section, values, groups) {
+  if (typeof values !== 'object' || Array.isArray(values)) throw new Error(`${CONFIG_PATH}: "${section}" must be an object`);
+
+  for (const [group, entries] of Object.entries(values)) {
+    if (!groups.has(group)) {
+      throw new Error(`${CONFIG_PATH}: ${section} group "${group}" isn't used by the listed callers (used: ${[...groups].join(', ') || 'none'})`);
+    }
+
+    if (!entries || typeof entries !== 'object' || Array.isArray(entries)) throw new Error(`${CONFIG_PATH}: ${section}.${group} must be an object`);
+
+    for (const key of Object.keys(entries)) {
+      if (!NAME_RE.test(key)) throw new Error(`${CONFIG_PATH}: invalid input name ${section}.${group}.${key}`);
+    }
+  }
+}
+
 export function validateConfig(config, templates) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error(`${CONFIG_PATH} must be a JSON object`);
 
@@ -77,51 +112,56 @@ export function validateConfig(config, templates) {
 
   const inputs = config.inputs ?? {};
 
-  if (typeof inputs !== 'object' || Array.isArray(inputs)) throw new Error(`${CONFIG_PATH}: "inputs" must be an object`);
-
-  const groups = new Set(callers.flatMap((name) => inputGroups(templates[name] ?? '')));
+  validateGroups('inputs', inputs, new Set(callers.flatMap((name) => inputGroups(templates[name] ?? ''))));
 
   for (const [group, values] of Object.entries(inputs)) {
-    if (!groups.has(group)) {
-      throw new Error(`${CONFIG_PATH}: inputs group "${group}" isn't used by the listed callers (used: ${[...groups].join(', ') || 'none'})`);
-    }
+    for (const [key, value] of Object.entries(values)) renderValue(value, `inputs.${group}.${key}`);
+  }
 
-    if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error(`${CONFIG_PATH}: inputs.${group} must be an object`);
+  const secrets = config.secrets ?? {};
 
-    for (const [key, value] of Object.entries(values)) {
-      if (!NAME_RE.test(key)) throw new Error(`${CONFIG_PATH}: invalid input name inputs.${group}.${key}`);
-      renderValue(value, `inputs.${group}.${key}`);
+  validateGroups('secrets', secrets, new Set(callers.flatMap((name) => secretGroups(templates[name] ?? ''))));
+
+  for (const [group, values] of Object.entries(secrets)) {
+    for (const [key, name] of Object.entries(values)) {
+      if (typeof name !== 'string' || !SECRET_NAME_RE.test(name)) {
+        throw new Error(`${CONFIG_PATH}: secrets.${group}.${key} must name a repository secret, e.g. "DEPLOY_KEY"`);
+      }
     }
   }
 
-  return { callers: [...new Set(callers)], inputs };
+  return { callers: [...new Set(callers)], inputs, secrets };
 }
 
-export function renderCaller(template, { sha, version, inputs = {} }) {
+export function renderCaller(template, { sha, version, inputs = {}, secrets = {} }) {
   if (!SHA_RE.test(sha)) throw new Error(`invalid commit SHA: ${sha}`);
   if (!VERSION_RE.test(version)) throw new Error(`invalid version: ${version}`);
 
   const body = template
     .replace(/\r\n/g, '\n')
-    .replace(BLOCK_RE, (_, indent, kind, group) => renderBlock(indent, kind, group, inputs))
+    .replace(BLOCK_RE, (_, indent, kind, group) =>
+      kind === 'secrets' ? renderSecretsBlock(indent, group, secrets) : renderBlock(indent, kind, group, inputs),
+    )
     .replaceAll('{{sha}}', sha)
     .replaceAll('{{version}}', version);
 
-  if (/\{\{(sha|version|with:|inputs:)/.test(body)) throw new Error('template has an unrendered placeholder');
+  if (/\{\{(sha|version|with:|inputs:|secrets:)/.test(body)) throw new Error('template has an unrendered placeholder');
 
   return `${HEADER}${body.trimEnd()}\n`;
 }
 
 // Map of repository path → file content for every caller in `config`.
 export function renderAll(templates, config, pin) {
-  const { callers, inputs } = validateConfig(config, templates);
+  const { callers, inputs, secrets } = validateConfig(config, templates);
 
-  return new Map(callers.map((name) => [callerPath(name), renderCaller(templates[name], { ...pin, inputs })]));
+  return new Map(callers.map((name) => [callerPath(name), renderCaller(templates[name], { ...pin, inputs, secrets })]));
 }
 
 export function renderConfig(config) {
-  const { callers, inputs } = config;
+  const { callers, inputs, secrets } = config;
   const ordered = Object.keys(CALLERS).filter((name) => callers.includes(name));
+  // `secrets` only when set, so existing configs keep their canonical form.
+  const extra = secrets && Object.keys(secrets).length > 0 ? { secrets } : {};
 
-  return `${JSON.stringify({ callers: ordered, inputs }, null, 2)}\n`;
+  return `${JSON.stringify({ callers: ordered, inputs, ...extra }, null, 2)}\n`;
 }

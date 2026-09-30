@@ -93,6 +93,7 @@ Branch from `develop` (or `main` in a main-only repository).
    | freeing disk space | `ci.free-disk-space: true` |
    | a longer timeout | `ci.timeout-minutes` |
    | a build script other than `build` | `publish.build-script` |
+   | checked out git submodules | `ci.submodules: true` and `publish.submodules: true`, plus `secrets.ci` and `secrets.publish` for private ones (see [Private submodules](workflows.md#private-submodules)) |
 
 2. **Run the installer** from the repository:
 

@@ -51,6 +51,22 @@ Values are strings, numbers or booleans. To change a setting, edit the JSON
 and re-run the installer. Don't edit the callers by hand: drift sync would
 undo it.
 
+An optional `secrets` object passes repository secrets to the shared
+workflows. Its groups are `ci` and `publish`. Each value names a secret of
+the package repository, never the secret itself:
+
+```json
+{
+  "secrets": {
+    "ci": { "ssh-private-key": "DEPLOY_KEY" },
+    "publish": { "ssh-private-key": "DEPLOY_KEY" }
+  }
+}
+```
+
+This renders `ssh-private-key: ${{ secrets.DEPLOY_KEY }}` under `secrets:` in
+the caller. See [Private submodules](#private-submodules).
+
 ### Drift sync
 
 `drift-sync.yml` in this repository keeps the installed callers current. It
@@ -124,6 +140,9 @@ jobs:
 | `audit` | `true` | Run the dependency audit job. |
 | `audit-command` | `npm audit --audit-level=high` | Command that performs the audit. |
 | `timeout-minutes` | `20` | Timeout of the CI job. |
+| `submodules` | `false` | Check out git submodules at the commits pinned in the ref. See [Private submodules](#private-submodules). |
+
+Secret: `ssh-private-key` (optional), the SSH key for private submodules.
 
 Example with the extra inputs a larger package needs:
 
@@ -215,6 +234,41 @@ jobs:
 | `audit-command` | `npm audit --audit-level=high` | Command that performs the audit. |
 | `install` | `false` | Run `npm ci --ignore-scripts` first. Only needed when `audit-command` runs project code. |
 | `working-directory` | `.` | Directory containing `package.json` and `package-lock.json`. |
+
+## Private submodules
+
+A package that builds from git submodules sets `submodules: true` for CI and
+for publishing. If the submodules are private, it also passes an SSH key:
+
+```json
+{
+  "inputs": {
+    "ci": { "submodules": true },
+    "publish": { "submodules": true }
+  },
+  "secrets": {
+    "ci": { "ssh-private-key": "DEPLOY_KEY" },
+    "publish": { "ssh-private-key": "DEPLOY_KEY" }
+  }
+}
+```
+
+- **Pinned commits.** Submodules are checked out at the commits recorded in
+  the checked-out ref, never with `--remote`. A release builds exactly what
+  its commit pins.
+- **Where they're checked out.** `node-ci.yml` checks them out in the CI job,
+  and `release-beta.yml` and `release.yml` in the publish job. Jobs that only
+  compute versions or create tags don't need them.
+- **The key.** It is loaded into `ssh-agent` with
+  [webfactory/ssh-agent](https://github.com/webfactory/ssh-agent), and removed
+  from the agent right after the fetch, before `npm ci` runs any install
+  script.
+- **Several repositories.** One key per repository works: put all the deploy
+  keys in the one secret, each with the repository URL as its key comment,
+  e.g. `ssh-keygen -C "git@github.com:owner/repo.git"`. Alternatively, use a
+  single key of a machine user that can read every submodule repository.
+- **Forks.** Pull requests from forks get no secrets, so private submodules
+  can't be fetched there.
 
 ## Release workflows
 
@@ -337,6 +391,9 @@ The two publishing workflows have the same inputs:
 | `test` | `true` | Run `npm test` before publishing, if the script exists. |
 | `environment` | `npm-publish` | GitHub environment of the publish job. The npm trusted publisher should name it. |
 | `access` | `public` | npm access level. |
+| `submodules` | `false` | Check out git submodules in the publish job. See [Private submodules](#private-submodules). |
+
+Secret: `ssh-private-key` (optional), the SSH key for private submodules.
 
 `release.yml` has two outputs, `released` (`"true"` when a new release was
 created) and `version`.
