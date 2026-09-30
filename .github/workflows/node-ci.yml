@@ -79,6 +79,14 @@ on:
         description: Timeout of the CI job.
         type: number
         default: 20
+      submodules:
+        description: Check out git submodules (recursively) at the commits pinned in the checked-out ref.
+        type: boolean
+        default: false
+    secrets:
+      ssh-private-key:
+        description: SSH key(s) for private submodules. Only loaded for the submodule checkout.
+        required: false
 
 permissions: {}
 
@@ -100,6 +108,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - if: inputs.submodules
+        uses: $/.github/actions/submodules
+        with:
+          ssh-private-key: ${{ secrets.ssh-private-key }}
 
       - name: Set environment variables
         if: inputs.env-vars != ''

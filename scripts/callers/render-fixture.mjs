@@ -18,12 +18,23 @@ import { loadTemplatesFromDir } from './source.mjs';
 const PIN = { sha: 'cf845c043bfdebca3b0db0df24cb8e0a6aa71dc6', version: 'v0.5.0' };
 
 const INPUTS = {
-  ci: { 'dist-dir': 'dist', 'extra-scripts': 'test:e2e\ntest:e2e:browser', 'free-disk-space': true, 'timeout-minutes': 30 },
+  ci: {
+    'dist-dir': 'dist',
+    'extra-scripts': 'test:e2e\ntest:e2e:browser',
+    'free-disk-space': true,
+    'timeout-minutes': 30,
+    submodules: true,
+  },
   'secret-scan': { 'full-history': false },
   'dependency-audit': { 'audit-command': 'npm run audit:all' },
-  publish: { 'build-script': 'build:component', test: false },
+  publish: { 'build-script': 'build:component', test: false, submodules: true },
   prepare: { base: 'develop' },
   'main-ahead-check': { mode: 'warn' },
+};
+
+const SECRETS = {
+  ci: { 'ssh-private-key': 'DEPLOY_KEY' },
+  publish: { 'ssh-private-key': 'DEPLOY_KEY' },
 };
 
 const out = process.argv[2];
@@ -36,8 +47,8 @@ if (!out) {
 const templates = loadTemplatesFromDir(join(dirname(fileURLToPath(import.meta.url)), '../../templates'));
 const callers = Object.keys(CALLERS);
 
-for (const [variant, inputs] of [['with-inputs', INPUTS], ['defaults', {}]]) {
-  for (const [path, content] of renderAll(templates, { callers, inputs }, PIN)) {
+for (const [variant, inputs, secrets] of [['with-inputs', INPUTS, SECRETS], ['defaults', {}, {}]]) {
+  for (const [path, content] of renderAll(templates, { callers, inputs, secrets }, PIN)) {
     const target = join(out, variant, path);
 
     mkdirSync(dirname(target), { recursive: true });

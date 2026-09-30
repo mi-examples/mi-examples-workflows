@@ -37,6 +37,7 @@ jobs:
       id-token: write # npm Trusted Publishing (OIDC)
     uses: mi-examples/mi-examples-workflows/.github/workflows/release-beta.yml@{{sha}} # {{version}}
     {{with:publish}}
+    {{secrets:publish}}
 
   release:
     name: Release
@@ -46,6 +47,7 @@ jobs:
       id-token: write # npm Trusted Publishing (OIDC)
     uses: mi-examples/mi-examples-workflows/.github/workflows/release.yml@{{sha}} # {{version}}
     {{with:publish}}
+    {{secrets:publish}}
 
   back-merge:
     name: Back-merge

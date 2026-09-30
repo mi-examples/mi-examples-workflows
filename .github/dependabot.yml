@@ -2,7 +2,10 @@ version: 2
 
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    # The composite actions pin third-party actions too.
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
     # Give the community a week to spot a compromised release before we pick it up.

@@ -19,3 +19,4 @@ jobs:
       contents: read
     uses: mi-examples/mi-examples-workflows/.github/workflows/node-ci.yml@{{sha}} # {{version}}
     {{with:ci}}
+    {{secrets:ci}}

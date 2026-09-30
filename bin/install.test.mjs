@@ -67,6 +67,25 @@ describe('install', () => {
     assert.deepEqual((await run()).changed, []);
   });
 
+  it('keeps secrets from the config and passes them to the callers', async () => {
+    mkdirSync(join(repo.dir, '.github'), { recursive: true });
+    writeFileSync(
+      join(repo.dir, '.github/mi-examples-workflows.json'),
+      JSON.stringify({
+        callers: ['ci', 'release'],
+        inputs: { ci: { submodules: true }, publish: { submodules: true } },
+        secrets: { ci: { 'ssh-private-key': 'DEPLOY_KEY' }, publish: { 'ssh-private-key': 'DEPLOY_KEY' } },
+      }),
+    );
+
+    await run();
+
+    assert.match(read('.github/workflows/ci.yml'), /submodules: true\n {4}secrets:\n {6}ssh-private-key: \$\{\{ secrets\.DEPLOY_KEY \}\}\n$/);
+    assert.equal(read('.github/workflows/release.yml').match(/ssh-private-key: \$\{\{ secrets\.DEPLOY_KEY \}\}/g).length, 2);
+    assert.deepEqual(JSON.parse(read('.github/mi-examples-workflows.json')).secrets.ci, { 'ssh-private-key': 'DEPLOY_KEY' });
+    assert.deepEqual((await run()).changed, []);
+  });
+
   it('writes LF files and treats CRLF copies as unchanged', async () => {
     await run();
 
