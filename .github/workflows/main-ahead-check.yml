@@ -86,6 +86,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: write # re-runs the failed check runs of open pull requests
+      contents: read # compares the branches; private repositories need it for the compare API
       pull-requests: read # lists the open pull requests into the base branch
     steps:
       - name: Re-run failed main-ahead checks
