@@ -13,7 +13,7 @@ The release flow and drift sync use the GitHub App and two org-level
 settings. Check that the repository can see them:
 
 ```sh
-gh api "repos/$repo/actions/organization-variables" --jq '.variables[].name'  # WORKFLOWS_BOT_APP_ID
+gh api "repos/$repo/actions/organization-variables" --jq '.variables[].name'  # WORKFLOWS_BOT_CLIENT_ID
 gh api "repos/$repo/actions/organization-secrets" --jq '.secrets[].name'      # WORKFLOWS_BOT_APP_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY
 ```
 
@@ -36,7 +36,7 @@ id="$(gh api "repos/$repo" --jq .id)"
 for secret in WORKFLOWS_BOT_APP_KEY OPENROUTER_API_KEY OPENAI_API_KEY; do
   gh api -X PUT "orgs/mi-examples/actions/secrets/$secret/repositories/$id"
 done
-gh api -X PUT "orgs/mi-examples/actions/variables/WORKFLOWS_BOT_APP_ID/repositories/$id"
+gh api -X PUT "orgs/mi-examples/actions/variables/WORKFLOWS_BOT_CLIENT_ID/repositories/$id"
 ```
 
 ## 2. Configure the repository
