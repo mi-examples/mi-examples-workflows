@@ -7,8 +7,11 @@ name: Back-merge
 #
 # It opens a pull request instead of pushing to develop, so develop's
 # required checks run on the merge. The GitHub App token is used because
-# pull requests opened with GITHUB_TOKEN don't trigger CI. Merge conflicts are
-# left in the pull request for a person to resolve.
+# pull requests opened with GITHUB_TOKEN don't trigger CI. It needs
+# `contents: write`: GitHub refuses both a merge and auto-merge to a token
+# that can only read the contents. With required checks pending, auto-merge
+# merges once they pass; without any, the pull request is merged right away.
+# Merge conflicts are left in the pull request for a person to resolve.
 #
 # Skipped when the repository has no develop branch, or when develop already
 # contains main.
@@ -67,7 +70,7 @@ jobs:
           app-id: ${{ inputs.app-id }}
           private-key: ${{ secrets.app-key }}
           repositories: ${{ github.event.repository.name }}
-          permission-contents: read
+          permission-contents: write # merging, or enabling auto-merge, needs it
           permission-pull-requests: write
 
       - name: Open the back-merge pull request
@@ -102,8 +105,37 @@ jobs:
             echo "Opened $url"
           fi
 
-          if gh pr merge "$number" --repo "$REPO" --auto --merge 2>/dev/null; then
-            echo "Auto-merge (merge commit) is on for #$number."
+          # Mergeability is computed in the background; it is UNKNOWN right after the pull request opens.
+          mergeable=UNKNOWN
+          for delay in 2 4 8 16 30; do
+            mergeable="$(gh pr view "$number" --repo "$REPO" --json mergeable --jq .mergeable)"
+            [[ "$mergeable" != "UNKNOWN" ]] && break
+            sleep "$delay"
+          done
+          if [[ "$mergeable" == "CONFLICTING" ]]; then
+            echo "::warning::#$number has merge conflicts. Resolve them in the pull request and merge it with a merge commit."
+            exit 0
+          fi
+
+          # With required checks pending this turns on auto-merge; when nothing is pending, gh merges right away.
+          error=""
+          for delay in 0 10 30; do
+            sleep "$delay"
+            if error="$(gh pr merge "$number" --repo "$REPO" --auto --merge 2>&1)"; then
+              error=""
+              break
+            fi
+            error="${error//$'\n'/ }"
+            echo "Attempt failed: $error"
+          done
+          if [[ -n "$error" ]]; then
+            echo "::warning::Could not merge #$number or turn on auto-merge: $error. Merge it with a merge commit."
+            exit 0
+          fi
+
+          state="$(gh pr view "$number" --repo "$REPO" --json state --jq .state)"
+          if [[ "$state" == "MERGED" ]]; then
+            echo "Merged #$number (merge commit)."
           else
-            echo "::warning::Could not enable auto-merge for #$number (disabled in the repository settings, or conflicts). Merge it with a merge commit."
+            echo "Auto-merge (merge commit) is on for #$number; it merges once the required checks pass."
           fi
