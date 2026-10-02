@@ -442,9 +442,13 @@ has; the callers the installer writes pass both.
 ### back-merge.yml
 
 It opens a pull request from `main` into `develop` using the App token, so
-`develop`'s required checks run. It then turns on auto-merge with a merge
-commit, when the repository allows auto-merge. Merge conflicts stay in the
-pull request for a person to resolve. The workflow does nothing without a
+`develop`'s required checks run. Once GitHub has computed the pull request's
+mergeability, it merges it with a merge commit: through auto-merge while
+required checks are pending (the repository must allow auto-merge), or right
+away when nothing is pending. The App token gets `contents: write` for this,
+because GitHub refuses both to a token that can only read the contents. A
+failure is retried, and the warning quotes GitHub's error. Merge conflicts
+stay in the pull request for a person to resolve. The workflow does nothing without a
 `develop` branch, or when `develop` already contains `main`.
 
 | Input | Default | Description |
