@@ -22,7 +22,7 @@ jobs:
       contents: read
     uses: mi-examples/mi-examples-workflows/.github/workflows/prepare-release.yml@{{sha}} # {{version}}
     with:
-      app-id: ${{ vars.WORKFLOWS_BOT_APP_ID }}
+      client-id: ${{ vars.WORKFLOWS_BOT_CLIENT_ID }}
       {{inputs:prepare}}
     secrets:
       app-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}
@@ -57,7 +57,7 @@ jobs:
       contents: read
     uses: mi-examples/mi-examples-workflows/.github/workflows/back-merge.yml@{{sha}} # {{version}}
     with:
-      app-id: ${{ vars.WORKFLOWS_BOT_APP_ID }}
+      client-id: ${{ vars.WORKFLOWS_BOT_CLIENT_ID }}
       version: ${{ needs.release.outputs.version }}
     secrets:
       app-key: ${{ secrets.WORKFLOWS_BOT_APP_KEY }}

@@ -34,7 +34,7 @@ describe('renderCaller', () => {
   it('adds inputs to an existing with: block', () => {
     const rendered = renderCaller(TEMPLATES.release, { ...PIN, inputs: { prepare: { base: 'develop' } } });
 
-    assert.match(rendered, /      app-id: \$\{\{ vars\.WORKFLOWS_BOT_APP_ID \}\}\n      base: "develop"\n    secrets:/);
+    assert.match(rendered, /      client-id: \$\{\{ vars\.WORKFLOWS_BOT_CLIENT_ID \}\}\n      base: "develop"\n    secrets:/);
   });
 
   it('renders a secrets: block after the with: block', () => {
