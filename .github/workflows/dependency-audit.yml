@@ -3,6 +3,12 @@ name: Dependency audit
 # Runs `npm audit` against the lockfile. Called on a weekly schedule by the
 # package repos, and by node-ci.yml on every pull request.
 #
+# By default it fails on high and critical findings, except advisories listed
+# in the shared allowlist, audit-allowlist.json. The list is read from main on
+# every run, so a change to it reaches every repository without a release. Only
+# the data comes from main; the audit code is the pinned commit. If the list
+# can't be loaded, nothing is allowlisted.
+#
 # The caller job needs `permissions: contents: read`.
 
 on:
@@ -13,9 +19,13 @@ on:
         type: string
         default: '24'
       audit-command:
-        description: Command that performs the audit.
+        description: Command that performs the audit. Empty runs `npm audit` for high and critical findings with the shared allowlist. A custom command gets the allowlist URL in AUDIT_ALLOWLIST_URL.
         type: string
-        default: npm audit --audit-level=high
+        default: ''
+      audit-allowlist:
+        description: URL or path of the allowlist. `none` turns it off.
+        type: string
+        default: https://raw.githubusercontent.com/mi-examples/mi-examples-workflows/main/audit-allowlist.json
       install:
         description: Run `npm ci --ignore-scripts` before the audit. Only needed when audit-command runs project code.
         type: boolean
@@ -51,7 +61,18 @@ jobs:
         if: inputs.install
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: Locate the audit tool
+        id: tools
+        uses: $/.github/actions/audit-tools
+
       - name: Audit
         env:
           AUDIT_COMMAND: ${{ inputs.audit-command }}
-        run: bash -euo pipefail -c "$AUDIT_COMMAND"
+          AUDIT_CLI: ${{ steps.tools.outputs.cli }}
+          AUDIT_ALLOWLIST_URL: ${{ inputs.audit-allowlist }}
+        run: |
+          if [[ -n "$AUDIT_COMMAND" ]]; then
+            bash -euo pipefail -c "$AUDIT_COMMAND"
+          else
+            node "$AUDIT_CLI"
+          fi

@@ -1,0 +1,11 @@
+{
+  "$comment": "Advisories the shared npm audit lets through, read from main on every run (docs/workflows.md#audit-allowlist). Only for advisories with no fix that are unreachable or acceptable. Every entry needs a reason and an until date; after it the entry stops applying.",
+  "entries": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "No fix: braces 3.0.3 is the latest. It arrives through @metricinsights/pp-dev -> http-proxy-middleware -> micromatch. http-proxy-middleware only calls micromatch for string or glob pathFilters, and pp-dev passes a function, so no pattern, and nothing from a request, reaches braces.",
+      "until": "2026-11-15"
+    }
+  ]
+}

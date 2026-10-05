@@ -138,7 +138,7 @@ jobs:
 | `free-disk-space` | `false` | Remove large preinstalled toolchains from the runner first. |
 | `pack-check` | `true` | List the files `npm pack` would publish. |
 | `audit` | `true` | Run the dependency audit job. |
-| `audit-command` | `npm audit --audit-level=high` | Command that performs the audit. |
+| `audit-command` | `''` | Command that performs the audit. Empty runs `npm audit` for high and critical findings with the [audit allowlist](#audit-allowlist). |
 | `timeout-minutes` | `20` | Timeout of the CI job. |
 | `submodules` | `false` | Check out git submodules at the commits pinned in the ref. See [Private submodules](#private-submodules). |
 
@@ -231,9 +231,62 @@ jobs:
 | Input | Default | Description |
 | -- | -- | -- |
 | `node-version` | `24` | Node.js version used to run the audit. |
-| `audit-command` | `npm audit --audit-level=high` | Command that performs the audit. |
+| `audit-command` | `''` | Command that performs the audit. Empty runs `npm audit` for high and critical findings with the [audit allowlist](#audit-allowlist). A custom command gets the allowlist URL in `AUDIT_ALLOWLIST_URL`. |
+| `audit-allowlist` | the list on `main` | URL or path of the allowlist. `none` turns it off. |
 | `install` | `false` | Run `npm ci --ignore-scripts` first. Only needed when `audit-command` runs project code. |
 | `working-directory` | `.` | Directory containing `package.json` and `package-lock.json`. |
+
+## Audit allowlist
+
+Sometimes an advisory has no fix yet, but can't be reached in our packages. For
+example, a vulnerable function that a dependency never calls. It would still
+fail the audit in every repository that has the package in its tree. Such
+advisories go into [`audit-allowlist.json`](../audit-allowlist.json):
+
+```json
+{
+  "entries": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "No fix: … Why it can't be reached …",
+      "until": "2026-11-15"
+    }
+  ]
+}
+```
+
+- **How it's read.** The audit reads the list from `main` on every run. A merged
+  change applies to the next audit in every repository, with no release and no
+  caller sync. The audit code itself stays pinned.
+- **What passes.** A high or critical finding passes only when every advisory
+  behind it has an entry that hasn't expired. Each advisory it lets through is
+  printed as a warning, with its reason.
+- **Expiry.** An entry applies through its `until` day (UTC). After that the
+  audit fails again and names the expired entry, so an exception can't outlive
+  its reason unnoticed. To extend one, change the date in a reviewed pull
+  request.
+- **Failures.** If the list can't be loaded, nothing is allowlisted. An invalid
+  entry is ignored, with a warning.
+- **Custom audit commands.** A custom `audit-command` gets the list's URL in
+  `AUDIT_ALLOWLIST_URL`, so a script such as `audit:all` can apply the same
+  list.
+
+Add an entry only for an advisory with **no fixed version**. A fixable advisory
+is fixed by updating the dependency or with an `overrides` entry. Each entry
+needs:
+- `id`: the GHSA id;
+- `reason`: why the advisory can't be reached, or why it's acceptable;
+- `until`: no more than about three months ahead.
+
+Remove the entry when a fix ships.
+
+Run the same audit locally from a package directory:
+
+```sh
+node path/to/mi-examples-workflows/scripts/audit/cli.mjs                    # list from main
+node path/to/mi-examples-workflows/scripts/audit/cli.mjs --allowlist none   # plain npm audit
+```
 
 ## Private submodules
 

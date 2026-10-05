@@ -1,7 +1,8 @@
 name: Node CI
 
 # Pull-request CI for an npm package: `npm ci`, then lint, typecheck, build,
-# tests and a package-contents check, plus `npm audit` in a parallel job.
+# tests and a package-contents check, plus `npm audit` in a parallel job
+# (dependency-audit.yml, with the shared allowlist).
 #
 # lint, typecheck, build and test run through `npm run --if-present`, so a
 # package without one of those scripts just skips it.
@@ -72,9 +73,9 @@ on:
         type: boolean
         default: true
       audit-command:
-        description: Command that performs the audit.
+        description: Command that performs the audit. Empty runs `npm audit` for high and critical findings with the shared allowlist (audit-allowlist.json).
         type: string
-        default: npm audit --audit-level=high
+        default: ''
       timeout-minutes:
         description: Timeout of the CI job.
         type: number
