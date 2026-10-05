@@ -1,0 +1,16 @@
+name: Audit tools
+description: 'Outputs the path of this repository''s audit CLI. Reference it with the self-repository syntax (uses: $/.github/actions/audit-tools), so the tool comes from the same commit as the calling workflow.'
+outputs:
+  cli:
+    description: Absolute path of scripts/audit/cli.mjs.
+    value: ${{ steps.locate.outputs.cli }}
+runs:
+  using: composite
+  steps:
+    - name: Locate the audit tool
+      id: locate
+      shell: bash
+      run: |
+        cli="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)/scripts/audit/cli.mjs"
+        test -f "$cli"
+        echo "cli=$cli" >> "$GITHUB_OUTPUT"

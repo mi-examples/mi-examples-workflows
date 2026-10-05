@@ -18,7 +18,7 @@ See [docs/workflows.md](docs/workflows.md) for caller examples and all inputs.
 | -- | -- | -- |
 | `node-ci.yml` | `npm ci`, then lint, typecheck, build, test and `npm audit` on pull requests. | available |
 | `secret-scan.yml` | gitleaks on pull requests. | available |
-| `dependency-audit.yml` | Weekly `npm audit` on the default branch. | available |
+| `dependency-audit.yml` | Weekly `npm audit` on the default branch, with the shared [audit allowlist](docs/workflows.md#audit-allowlist). | available |
 | `release-beta.yml` | Publishes `X.Y.Z-beta.N` to npm under the `beta` dist-tag on every push to `develop`. | piloting |
 | `prepare-release.yml` | Opens a release pull request into `main` with the version bump and a reviewed changelog entry. | piloting |
 | `release.yml` | Publishes the merged release to npm with Trusted Publishing (OIDC), then tags it and creates a GitHub release. | piloting |
