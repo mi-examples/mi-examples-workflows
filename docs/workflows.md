@@ -485,7 +485,6 @@ and edit the CHANGELOG entry before merging.
 | Input | Default | Description |
 | -- | -- | -- |
 | `client-id` | required | Client ID of the GitHub App (`vars.WORKFLOWS_BOT_CLIENT_ID`). |
-| `app-id` | `''` | Deprecated. The App ID, accepted in place of `client-id` until a later release. |
 | `base` | `''` | Branch to cut the release from. Empty means `develop` if it exists, otherwise `main`. |
 | `node-version` | `24` | Node.js version for the release tools. |
 
@@ -508,7 +507,6 @@ stay in the pull request for a person to resolve. The workflow does nothing with
 | Input | Default | Description |
 | -- | -- | -- |
 | `client-id` | required | Client ID of the GitHub App (`vars.WORKFLOWS_BOT_CLIENT_ID`). |
-| `app-id` | `''` | Deprecated. The App ID, accepted in place of `client-id` until a later release. |
 | `base` | `develop` | Branch to merge into. |
 | `head` | `main` | Released branch. |
 | `version` | `''` | Released version, used in the pull request title. |
